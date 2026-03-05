@@ -1,5 +1,7 @@
 #include "psnd/Kernel_Iterative.h"
 
+#include <cmath>
+
 #include "psnd/hash_fnv1a.h"
 #include "psnd/macro_utils.h"
 #include "psnd/vars_list.h"
@@ -17,7 +19,15 @@ void Kernel_Iterative::setInputParam_impl(std::shared_ptr<Param> PM) {
     sstep = _param->get_int({"solver.sstep"}, LOC(), 1);
 
     // set time grids
-    nstep = sstep * (int((tend - t0) / (sstep * dt0)));  // @bug? (try new algo for nstep)
+    const double block_size   = sstep * dt0;
+    const double raw_blocks   = (tend - t0) / block_size;
+    const double blocks_scale = (std::abs(raw_blocks) > 1.0) ? std::abs(raw_blocks) : 1.0;
+    const double tol          = 1.0e-12 * blocks_scale;
+    // keep floor-aligned stepping; tolerance only guards floating-point roundoff near integers
+    int aligned_blocks = static_cast<int>(std::floor(raw_blocks + tol));
+    if (aligned_blocks < 0) aligned_blocks = 0;
+
+    nstep = sstep * aligned_blocks;
     nsamp = nstep / sstep + 1;
 
     // Dimension::sstep = sstep;

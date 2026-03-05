@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include "psnd/hash_fnv1a.h"
 #include "psnd/macro_utils.h"
@@ -33,7 +34,16 @@ void Kernel_Iterative_Adapt::setInputParam_impl(std::shared_ptr<Param> PM) {
     exchange_root = _param->get_int({"solver.exchange_root", "exchange_root"}, LOC(), -1);
     exchange_num  = _param->get_int({"solver.exchange_num", "exchange_num"}, LOC(), 100);
     exchange_time = _param->get_real({"solver.exchange_time", "exchange_time"}, LOC(), 600.0);  // in second
-    nstep         = sstep * (int((tend - t0) / (sstep * dt0)));  // @bug? (try new algo for nstep)
+
+    const double block_size   = sstep * dt0;
+    const double raw_blocks   = (tend - t0) / block_size;
+    const double blocks_scale = (std::abs(raw_blocks) > 1.0) ? std::abs(raw_blocks) : 1.0;
+    const double tol          = 1.0e-12 * blocks_scale;
+    // keep floor-aligned stepping; tolerance only guards floating-point roundoff near integers
+    int aligned_blocks = static_cast<int>(std::floor(raw_blocks + tol));
+    if (aligned_blocks < 0) aligned_blocks = 0;
+
+    nstep = sstep * aligned_blocks;
     nsamp         = nstep / sstep + 1;
 
     // add by hclu251026

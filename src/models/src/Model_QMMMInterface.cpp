@@ -177,7 +177,7 @@ Status& Model_QMMMInterface::executeKernel_impl(Status& stat) {
 
     // write input
     std::ofstream ofs(crd_input);
-    ofs << "\n" << natom << "\n";
+    ofs << "PSiNad generated coordinates\n" << natom << "\n";
 
     for (int iatom = 0, idx = 0; iatom < natom; ++iatom) {
         // ofs << chem::getElemLabel(atoms[iatom]);  //
@@ -185,9 +185,8 @@ Status& Model_QMMMInterface::executeKernel_impl(Status& stat) {
             ofs << std::fixed << std::setprecision(7) << std::setw(12) << x[idx];
             idx++;
         }
-        if (iatom % 2 == 1) ofs << "\n";
+        if (iatom % 2 == 1 || iatom == natom - 1) ofs << "\n";
     }
-    ofs << "\n";
     ofs.close();
 
     // determine the level of calculation (larger level, more loose convergence criteria)

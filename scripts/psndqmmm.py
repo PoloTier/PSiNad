@@ -172,8 +172,15 @@ if __name__ == "__main__":
 
                 shutil.copy(os.path.join(startdir, args.input), '.')
 
-                if os.path.exists(os.path.join(startdir, 'box.info')):
-                    shutil.copy(os.path.join(startdir, 'box.info'), '.')
+                box_candidates = [
+                    os.path.abspath(os.path.join('.', '..', 'box.info')),
+                    os.path.join(startdir, 'box.info'),
+                ]
+                for box_src in box_candidates:
+                    if os.path.exists(box_src):
+                        shutil.copy(box_src, '.')
+                        Log.writeLog(f'box.info is copied from: {box_src}\n')
+                        break
 
             # Calculate relative paths
             layerfile_rel = os.path.relpath(os.path.join(startdir, ks_config.layer), '.')

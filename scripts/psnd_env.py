@@ -198,7 +198,7 @@ def checkPSNDEnv() -> Tuple[bool, str]:
         message = "Environment variable $PSND_SCRIPTS_PATH is not defined"
         return False, message
 
-    print(psnd_scripts_path)
+    # print(psnd_scripts_path)
 
     # Check if <PSND SCRIPTS> executables are available
     '''
@@ -250,24 +250,34 @@ def checkAmberEnv():
     except KeyError:
         message = "environment variable $AMBERHOME is not defined"
         return False, message
-        
-    command = shlex.split(os.path.join(AMBERHOME, "update_amber") + " -v")
 
-    # call update_amber to check the current version of amber
-    #command = shlex.split(os.path.join(AMBERHOME, "update_amber") + " -v")
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-    # process the std out line-by-line
-    amberVersion = ["8"]
-    for line in proc.stdout:
-        if b"AmberTools version" in line:
-            amberVersion = line.split()[2].split(b".")
-    proc.communicate()
+    amber_major = None
+    update_amber = os.path.join(AMBERHOME, "update_amber")
+    # AmberTools distributions may not provide update_amber anymore.
+    if os.path.isfile(update_amber) and os.access(update_amber, os.X_OK):
+        try:
+            proc = subprocess.Popen([update_amber, "-v"], stdout=subprocess.PIPE)
+            for line in proc.stdout:
+                if b"AmberTools version" in line:
+                    token = line.split()[2]
+                    amber_major = int(token.split(b".")[0])
+                    break
+            proc.communicate()
+        except Exception:
+            amber_major = None
 
-    # define the list of executables depending on the version of amber
-    if int(amberVersion[0]) <= 12:
-        exeList = ["antechamber", "tleap", "sander", "ambpdb", "parmchk", "cpptraj"]
+    if amber_major is not None and amber_major <= 12:
+        parmchk_exe = "parmchk"
+    elif amber_major is not None and amber_major > 12:
+        parmchk_exe = "parmchk2"
+    elif which("parmchk2"):
+        parmchk_exe = "parmchk2"
+    elif which("parmchk"):
+        parmchk_exe = "parmchk"
     else:
-        exeList = ["antechamber", "tleap", "sander", "ambpdb", "parmchk2", "cpptraj"]
+        return False, "neither parmchk2 nor parmchk executable is available"
+
+    exeList = ["antechamber", "tleap", "sander", "ambpdb", parmchk_exe, "cpptraj"]
 
     # check if amber executables are available
     for exe in exeList:
@@ -421,5 +431,3 @@ if __name__ == '__main__':
                 Log.writeLog(f'Is OK    [ENV INFO] {k}={v}\n')
             else:
                 Log.writeLog(f'Invalid  [ENV INFO] {k}={v}\n')
-
-

@@ -47,6 +47,8 @@ void Model_QMInterface::setInputParam_impl(std::shared_ptr<Param> PM) {
     sstep_dataset   = _param->get_int({"model.sstep_dataset"}, LOC(), 0);
     use_state_detection = _param->get_bool({"model.use_state_detection"}, LOC(), false); // 动力学减小计算量
 
+    nac_threshold = _param->get_real({"model.nac_threshold"}, LOC(), 1.0);
+
     char* p = getenv("PSND_PYTHON");
     if (p != nullptr) pypsnd_path = p;
     if (pypsnd_path == "" || !isFileExists(utils::concat(pypsnd_path, "/", "QM.py")))
@@ -83,6 +85,7 @@ void Model_QMInterface::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     // f_r              = DS->def(DATA::model::f_r);
     // f_p              = DS->def(DATA::model::f_p);
     // f_rp             = DS->def(DATA::model::f_rp);
+    osc_strength = DS->def_real("model.osc_strength", Dimension::F, "Oscillator strengths for transitions");
     V                = DS->def(DATA::model::V);
     dV               = DS->def(DATA::model::dV);
     eig              = DS->def(DATA::model::rep::eig);
@@ -150,10 +153,10 @@ void Model_QMInterface::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
                 getline(ifs, eachline);
                 for (int i = 0; i < Dimension::N; ++i) ifs >> x0[i];
             }
-            if (eachline.find("model.p0") != eachline.npos) {
-                getline(ifs, eachline);
-                for (int i = 0; i < Dimension::N; ++i) ifs >> p0[i];
-            }
+            // if (eachline.find("model.p0") != eachline.npos) {
+            //     getline(ifs, eachline);
+            //     for (int i = 0; i < Dimension::N; ++i) ifs >> p0[i];
+            // }
             if (eachline.find("model.hess") != eachline.npos) {
                 read_H = true;
                 getline(ifs, eachline);
@@ -252,20 +255,34 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
     //     // first lower the qm_String
     std::string  qm_string_lower = toLower(qm_string);
     auto         occ_nuc         = _dataset->def(DATA::integrator::occ_nuc);
-    const double deltaE_thres    = 0.3e0 / phys::au_2_ev;  // 0.3 eV in atomic unit
-    // 计算上一步中其他态跟占据态 occ 之间的能量差，能量差小于0.3eV才计算这两个态的耦合，注意eig是原子单位，需要转换为eV
+    const double deltaE_thres    = nac_threshold / phys::au_2_ev;  // default in 1.0 eV in atomic unit
+    // 计算上一步中其他态跟占据态 occ 之间的能量差，能量差小于nac_threshold eV才计算这两个态的耦合，注意eig是原子单位，需要转换为eV 
+    // std::vector<std::pair<int, int>> occ_pairs;
+    // for (int i = 0; i < Dimension::F; ++i) {
+    //     int j = occ_nuc[0];
+    //     if (i != j) {
+    //         double deltaE = eig[i] - eig[j];
+    //         if (std::abs(deltaE) < deltaE_thres) {  // 0.3 eV
+    //             std::cout << "[QMInterface] Coupling between state " << i << " and occupied state " << j
+    //                       << " is considered, ΔE = " << deltaE * 27.2114 << " eV\n";
+    //             occ_pairs.emplace_back(i, j);
+    //         }
+    //     }
+    // }
+
+    // 计算所有态对之间的能量差，能量差小于nac_threshold eV才计算这两个态的耦合
     std::vector<std::pair<int, int>> occ_pairs;
     for (int i = 0; i < Dimension::F; ++i) {
-        int j = occ_nuc[0];
-        if (i != j) {
-            double deltaE = eig[i] - eig[j];
-            if (std::abs(deltaE) < deltaE_thres) {  // 0.3 eV
-                std::cout << "[QMInterface] Coupling between state " << i << " and occupied state " << j
-                          << " is considered, ΔE = " << deltaE * 27.2114 << " eV\n";
+        for (int j = i + 1; j < Dimension::F; ++j) {  // 只遍历上三角，避免重复
+            double deltaE = std::abs(eig[i] - eig[j]);
+            if (deltaE < deltaE_thres) {
+                std::cout << "[QMInterface] Coupling between state " << i << " and state " << j
+                        << " is considered, ΔE = " << deltaE * phys::au_2_ev << " eV\n";
                 occ_pairs.emplace_back(i, j);
             }
         }
     }
+
     // 把occ pairs 转化为字符串的形式 如(0,1), (1,2) -> "01 12"
     // @ambiguous: Does '112' represent (11,2) or (1,12)?
     // @hexin
@@ -274,6 +291,7 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
 
     std::string qm_call_str;
     if (use_state_detection){
+        std::cout << "[QMInterface] Using state detection to reduce computational cost.\n";
         qm_call_str = utils::concat("python ", pypsnd_path, "/QM.py -t ", try_level,  //
                                             " -d ", path_str, " -i ", tmp_input, " -qm ", qm_string_lower, " -occ ",
                                             occ_nuc[0], " -ncouple ", occ_pairs_str);
@@ -310,6 +328,10 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
             if (eachline.find("interface.nac") != eachline.npos) {
                 getline(ifs, eachline);
                 for (int jik = 0; jik < Dimension::NFF; ++jik) ifs >> nac[jik];
+            } 
+            if (eachline.find("interface.strength") != eachline.npos) {
+                getline(ifs, eachline);
+                for (int i = 0; i < Dimension::F; ++i) ifs >> osc_strength[i];
             }
         }
         std::string command;
@@ -337,12 +359,28 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
     } else {
         if (s != 0) std::cout << "psnd external shell status bug\n";
         if (!isFileExists(utils::concat(path_str, "/interface.ds"))) std::cout << "interface.ds is not generated\n";
-        stat.succ      = false;
-        stat.fail_type = 1;
+
+        span<psnd_int> dtsize = _dataset->def(DATA::control::dtsize);
+        bool last_try = (dtsize[0] == 1);
+
+        // 如果没有生成interface.ds文件，开启force_run模式则使用上一步的结果继续运行 hclu 251218
+        if (_param->get_bool({"model.force_run"}, LOC(), false) && last_try) {
+            std::cout << "[QMInterface] Warning: interface.ds not generated, but force_run is ON, use previous step results.\n";
+            std::cout << "[QMInterface] Note: This is a very dangerous operation, please make sure you know what you are doing and do enough test!\n";
+            stat.fail_type = 0; // reset fail_type, use previous results
+
+        } else {
+            stat.succ      = false;
+            stat.fail_type = 1;
+        }
     }
 
     if (stat.succ) {
         if (!stat.first_step) track_nac_sign();  // @note track_nac_sign is important
+        else {
+            // in the first step, just copy nac to nac_prev
+            for (int i = 0; i < Dimension::NFF; ++i) nac_prev[i] = nac[i];
+        }
         for (int i = 0, idx = 0; i < Dimension::N; ++i) {
             for (int j = 0; j < Dimension::F; ++j) {
                 for (int k = 0; k < Dimension::F; ++k, ++idx) {
@@ -357,6 +395,7 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
 }
 
 int Model_QMInterface::track_nac_sign() {
+    std::cout << "[QMInterface] Tracking NAC sign to ensure continuity.\n";
     for (int i = 0; i < Dimension::F; ++i) {
         for (int j = 0; j < Dimension::F; ++j) {  // check if NAC(:,i,j) should flip its sign
             if (i == j) continue;

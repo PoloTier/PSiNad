@@ -1,5 +1,7 @@
 #include "psnd/Kernel_Iterative.h"
 
+#include <cmath>
+
 #include "psnd/hash_fnv1a.h"
 #include "psnd/macro_utils.h"
 #include "psnd/vars_list.h"
@@ -11,13 +13,21 @@ const std::string Kernel_Iterative::getName() { return "Kernel_Iterative"; }
 int Kernel_Iterative::getType() const { return utils::hash(FUNCTION_NAME); }
 
 void Kernel_Iterative::setInputParam_impl(std::shared_ptr<Param> PM) {
-    t0    = _param->get_real({"model.t0", "solver.t0"}, LOC(), phys::time_d, 0.0f);
-    tend  = _param->get_real({"model.tend", "solver.tend"}, LOC(), phys::time_d, 1.0f);
-    dt0   = _param->get_real({"model.dt", "solver.dt"}, LOC(), phys::time_d, 0.1f);
+    t0    = _param->get_real({"model.t0", "solver.t0"}, LOC(), phys::time_d, 0.0);
+    tend  = _param->get_real({"model.tend", "solver.tend"}, LOC(), phys::time_d, 1.0);
+    dt0   = _param->get_real({"model.dt", "solver.dt"}, LOC(), phys::time_d, 0.1);
     sstep = _param->get_int({"solver.sstep"}, LOC(), 1);
 
     // set time grids
-    nstep = sstep * (int((tend - t0) / (sstep * dt0)));  // @bug? (try new algo for nstep)
+    const double block_size   = sstep * dt0;
+    const double raw_blocks   = (tend - t0) / block_size;
+    const double blocks_scale = (std::abs(raw_blocks) > 1.0) ? std::abs(raw_blocks) : 1.0;
+    const double tol          = 1.0e-12 * blocks_scale;
+    // keep floor-aligned stepping; tolerance only guards floating-point roundoff near integers
+    int aligned_blocks = static_cast<int>(std::floor(raw_blocks + tol));
+    if (aligned_blocks < 0) aligned_blocks = 0;
+
+    nstep = sstep * aligned_blocks;
     nsamp = nstep / sstep + 1;
 
     // Dimension::sstep = sstep;

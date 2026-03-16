@@ -45,6 +45,7 @@ class Model_QMInterface final : public Model {
     bool save_every_step;
     int  sstep_dataset;
     bool use_state_detection;
+    psnd_real nac_threshold;
 
     // integrator
     span<psnd_real> x, p;
@@ -62,6 +63,8 @@ class Model_QMInterface final : public Model {
     span<psnd_real> f_r, f_p, f_rp;
     span<psnd_real> dt_ptr, t_ptr;
     span<psnd_int>  istep_ptr;
+
+    psnd_real* osc_strength;
 
     int  natom;
     int  read_flag;

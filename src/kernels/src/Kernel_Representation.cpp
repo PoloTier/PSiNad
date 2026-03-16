@@ -79,6 +79,8 @@ void Kernel_Representation::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     TtTold = DS->def(DATA::integrator::tmp::TtTold);
     ve     = DS->def(DATA::integrator::tmp::ve);
     vedE   = DS->def(DATA::integrator::tmp::vedE);
+
+    nac = DS->def(DATA::model::rep::nac);
 }
 
 Status& Kernel_Representation::initializeKernel_impl(Status& stat) { return stat; }
@@ -178,7 +180,7 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                         if (!basis_switch) {
                             for (int i = 0, ik = 0; i < Dimension::F; ++i) {
                                 for (int k = 0; k < Dimension::F; ++k, ++ik) {
-                                    TtTold[ik] = (i == k) ? copysign(1.0f, TtTold[ik]) : 0;
+                                    TtTold[ik] = (i == k) ? copysign(1.0, TtTold[ik]) : 0;
                                 }
                             }
                         } else {
@@ -195,7 +197,7 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                                         }
                                     }
                                 }
-                                double vsign = copysign(1.0f, TtTold[csr12]);
+                                double vsign = copysign(1.0, TtTold[csr12]);
                                 for (int k2 = 0, k1k2 = csr1 * Dimension::F;  //
                                      k2 < Dimension::F;                       //
                                      ++k2, ++k1k2) {
@@ -249,16 +251,35 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                 for (int i = 0; i < Dimension::F; ++i) Emean += eig[i];
                 Emean /= Dimension::F;
 
-                for (int i = 0, ij = 0; i < Dimension::F; ++i) {
-                    for (int j = 0; j < Dimension::F; ++j, ++ij) {  //
-                        H[ij] = ((i == j) ? eig[i] - Emean : -phys::math::im * vedE[ij] / (eig[j] - eig[i]));
+                if (!onthefly){
+                    for (int i = 0, ij = 0; i < Dimension::F; ++i) {
+                        for (int j = 0; j < Dimension::F; ++j, ++ij) {  //
+                            H[ij] = ((i == j) ? eig[i] - Emean : -phys::math::im * vedE[ij] / (eig[j] - eig[i]));
+                        }
+                    }
+                } else {
+                    // 先全部计算，然后修正对角线
+                    for (int ij = 0; ij < Dimension::FF; ++ij) {
+                        H[ij] = 0.0e0;
+                    }
+
+                    for (int k = 0; k < Dimension::N; ++k) {
+                        psnd_complex factor = -phys::math::im * ve[k];
+                        for (int ij = 0; ij < Dimension::FF; ++ij) {
+                            H[ij] += factor * nac[k * Dimension::FF + ij];
+                        }
+                    }
+
+                    // 修正对角线
+                    for (int i = 0, ii = 0; i < Dimension::F; ++i, ii += Dimension::Fadd1) {
+                        H[ii] = eig[i] - Emean;
                     }
                 }
 
                 if (phase_correction) {
                     psnd_real Ekin = 0;
                     for (int j = 0; j < Dimension::N; ++j) Ekin += 0.5f * p[j] * p[j] / m[j];
-                    double Epes = 0.0f;
+                    double Epes = 0.0;
                     if (Kernel_NAForce::NAForce_type == NAForcePolicy::BO) {
                         Epes = eig[occ_nuc[0]];
                     } else {
@@ -267,7 +288,7 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                         }
                     }
                     for (int i = 0, ii = 0; i < Dimension::F; ++i, ii += Dimension::Fadd1) {
-                        H[ii] = -2 * Ekin * sqrt(std::max<double>(1.0 + (Epes - eig[i]) / Ekin, 0.0f));
+                        H[ii] = -2 * Ekin * sqrt(std::max<double>(1.0 + (Epes - eig[i]) / Ekin, 0.0));
                     }
                 }
                 EigenSolve(lam.data(), R.data(), H.data(), Dimension::F);  // R*L*R^ = H

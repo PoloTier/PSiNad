@@ -157,12 +157,30 @@ if __name__ == "__main__":
                     shutil.copy(os.path.join(startdir, ks_config.topo1), '.')
                     shutil.copy(os.path.join(startdir, ks_config.topo2), '.')
                     shutil.copy(os.path.join(startdir, ks_config.layer), '.')
-                    # shutil.copy(os.path.join(startdir, args.coord), '.')
+                    coord_src = os.path.join(startdir, args.coord)
+                    if args.coord and os.path.exists(coord_src):
+                        coord_src_abs = os.path.abspath(coord_src)
+                        coord_dst_abs = os.path.abspath(os.path.join('.', os.path.basename(args.coord)))
+                        same_coord_file = False
+                        if os.path.exists(coord_dst_abs):
+                            try:
+                                same_coord_file = os.path.samefile(coord_src_abs, coord_dst_abs)
+                            except OSError:
+                                same_coord_file = False
+                        if not same_coord_file:
+                            shutil.copy(coord_src_abs, '.')
 
                 shutil.copy(os.path.join(startdir, args.input), '.')
 
-                if os.path.exists(os.path.join(startdir, 'box.info')):
-                    shutil.copy(os.path.join(startdir, 'box.info'), '.')
+                box_candidates = [
+                    os.path.abspath(os.path.join('.', '..', 'box.info')),
+                    os.path.join(startdir, 'box.info'),
+                ]
+                for box_src in box_candidates:
+                    if os.path.exists(box_src):
+                        shutil.copy(box_src, '.')
+                        Log.writeLog(f'box.info is copied from: {box_src}\n')
+                        break
 
             # Calculate relative paths
             layerfile_rel = os.path.relpath(os.path.join(startdir, ks_config.layer), '.')
@@ -274,7 +292,7 @@ if __name__ == "__main__":
             charges.rallyCharges(qmcalc.charges)
             f = open('laststep.charge', 'w')
             for i in range(len(qmcalc.charges)):
-                f.write('{: 12.8e}\n'.format(qmcalc.charges[i]))
+                f.write('{:24.16e}\n'.format(qmcalc.charges[i]))
             f.flush()
             f.close()
 
@@ -321,7 +339,7 @@ if __name__ == "__main__":
             f.write('interface.eig\n')
             f.write('psnd_real %d\n'%len(qmmm_results.energies))
             for i in range(len(qmmm_results.energies)): # sorted order
-                f.write('{: 12.8e}\n'.format(qmmm_results.energies[i]))
+                f.write('{:24.16e}\n'.format(qmmm_results.energies[i]))
             f.write('\n')
 
             # write energy
@@ -332,13 +350,13 @@ if __name__ == "__main__":
                 if i+1 in geometry.list_MEDIUM_HIGH:
                     for ix in [0,1,2]:
                         for k in range(len(qmmm_results.energies)):
-                            f.write('{: 12.8e} '.format(qmmm_results.gradient[k][ix][jHM]))
+                            f.write('{:24.16e} '.format(qmmm_results.gradient[k][ix][jHM]))
                         f.write('\n')
                     jHM += 1
                 if i+1 in geometry.list_LOW:
                     for ix in [0,1,2]:
                         for k in range(len(qmmm_results.energies)):
-                            f.write('{: 12.8e} '.format(0))
+                            f.write('{:24.16e} '.format(0))
                         f.write('\n')
             f.write('\n')
 
@@ -352,16 +370,16 @@ if __name__ == "__main__":
                         for k1 in range(len(qmmm_results.energies)):
                             for k2 in range(len(qmmm_results.energies)):
                                 if k2 == k1:
-                                    f.write('{: 12.8e} '.format(0))
+                                    f.write('{:24.16e} '.format(0))
                                 else:
-                                    f.write('{: 12.8e} '.format(qmmm_results.nac[k1][k2][ix][jHM]))
+                                    f.write('{:24.16e} '.format(qmmm_results.nac[k1][k2][ix][jHM]))
                         f.write('\n')
                     jHM += 1
                 if i+1 in geometry.list_LOW:
                     for ix in [0,1,2]:
                         for k1 in range(len(qmmm_results.energies)):
                             for k2 in range(len(qmmm_results.energies)):
-                                f.write('{: 12.8e} '.format(0))
+                                f.write('{:24.16e} '.format(0))
                         f.write('\n')
             f.write('\n')
 
@@ -370,9 +388,9 @@ if __name__ == "__main__":
             f.write('psnd_real %d\n'%len(qmmm_results.energies))
             for i in range(len(qmmm_results.energies)): # sorted order
                 if i==0:
-                    f.write('{: 12.8e}\n'.format(0))
+                    f.write('{:24.16e}\n'.format(0))
                 else:
-                    f.write('{: 12.8e}\n'.format(qmcalc.outputData.dataDict["osc_strength"][i]))
+                    f.write('{:24.16e}\n'.format(qmcalc.outputData.dataDict["osc_strength"][i]))
             f.write('\n')
 
             f.flush()
@@ -424,4 +442,3 @@ if __name__ == "__main__":
     Log.end()
 
     os.chdir(startdir)
-

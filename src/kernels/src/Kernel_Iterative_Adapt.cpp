@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include "psnd/hash_fnv1a.h"
 #include "psnd/macro_utils.h"
@@ -22,10 +23,10 @@ const std::string Kernel_Iterative_Adapt::getName() { return "Kernel_Iterative_A
 int Kernel_Iterative_Adapt::getType() const { return utils::hash(FUNCTION_NAME); }
 
 void Kernel_Iterative_Adapt::setInputParam_impl(std::shared_ptr<Param> PM) {
-    t0            = _param->get_real({"model.t0", "solver.t0"}, LOC(), phys::time_d, 0.0f);
-    tend          = _param->get_real({"model.tend", "solver.tend"}, LOC(), phys::time_d, 1.0f);
-    dt0           = _param->get_real({"model.dt", "solver.dt"}, LOC(), phys::time_d, 0.1f);
-    time_unit     = _param->get_real({"model.time_unit", "solver.time_unit"}, LOC(), phys::time_d, 1.0f);
+    t0            = _param->get_real({"model.t0", "solver.t0"}, LOC(), phys::time_d, 0.0);
+    tend          = _param->get_real({"model.tend", "solver.tend"}, LOC(), phys::time_d, 1.0);
+    dt0           = _param->get_real({"model.dt", "solver.dt"}, LOC(), phys::time_d, 0.1);
+    time_unit     = _param->get_real({"model.time_unit", "solver.time_unit"}, LOC(), phys::time_d, 1.0);
     sstep         = _param->get_int({"solver.sstep"}, LOC(), 1);
     msize         = _param->get_int({"solver.msize"}, LOC(), 128);
     nbackup       = _param->get_int({"solver.nbackup"}, LOC(), 1);
@@ -33,7 +34,16 @@ void Kernel_Iterative_Adapt::setInputParam_impl(std::shared_ptr<Param> PM) {
     exchange_root = _param->get_int({"solver.exchange_root", "exchange_root"}, LOC(), -1);
     exchange_num  = _param->get_int({"solver.exchange_num", "exchange_num"}, LOC(), 100);
     exchange_time = _param->get_real({"solver.exchange_time", "exchange_time"}, LOC(), 600.0);  // in second
-    nstep         = sstep * (int((tend - t0) / (sstep * dt0)));  // @bug? (try new algo for nstep)
+
+    const double block_size   = sstep * dt0;
+    const double raw_blocks   = (tend - t0) / block_size;
+    const double blocks_scale = (std::abs(raw_blocks) > 1.0) ? std::abs(raw_blocks) : 1.0;
+    const double tol          = 1.0e-12 * blocks_scale;
+    // keep floor-aligned stepping; tolerance only guards floating-point roundoff near integers
+    int aligned_blocks = static_cast<int>(std::floor(raw_blocks + tol));
+    if (aligned_blocks < 0) aligned_blocks = 0;
+
+    nstep = sstep * aligned_blocks;
     nsamp         = nstep / sstep + 1;
 
     // add by hclu251026
@@ -444,6 +454,8 @@ Status& Kernel_Iterative_Adapt::executeKernel_impl(Status& stat) {
                 _dataset->dump(ofs2);
                 ofs2.close();
                 stat.frozen = true;
+
+                return stat;
             }
             case 'T':
             case 'R':
@@ -481,7 +493,7 @@ Status& Kernel_Iterative_Adapt::executeKernel_impl(Status& stat) {
 
                 // suggest new dt (don't minimize dt for fail_type==1)
                 dtsize[0] = (stat.last_attempt || stat.fail_type == 1) ? dtsize[0] : dtsize[0] / 2;
-                tsize[0] += 0;
+                // tsize[0] += 0;
 
                 for (auto& fname : backup_fields) {
                     _dataset->_def(utils::concat("integrator.", fname),     //

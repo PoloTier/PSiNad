@@ -437,9 +437,9 @@ def sander_real(geometry,ks_config):
         _ks_config = shlex.split('sander -O -i real-sander-second.inp -o real-sander-second.out -p real.top -c real.rst -r real-second.rst')
     
     if os.path.exists('box.info'):
-        boxline = open('box.info', 'r').readlines()
-        os.system('echo "" >> real.rst')
-        os.system('tail -n1 box.info >> real.rst')
+        box_line = open('box.info', 'r').readlines()[-1].rstrip('\r\n')
+        with open('real.rst', 'a') as f:
+            f.write(box_line + '\n')
     
     current_dir = os.path.abspath(os.getcwd())
     print("current dir is:", current_dir)
@@ -552,8 +552,9 @@ def sander_modelH(geometry,ks_config):
       _ks_config = shlex.split('sander -O -i model-H-sander.inp -o model-H.out -p model-H-noc.top -c model-H.crd -r model-H.rst')
 
     if os.path.exists('box.info'):
-        boxline = open('box.info', 'r').readlines()
-        os.system('tail -n1 box.info >> model-H.crd')
+        box_line = open('box.info', 'r').readlines()[-1].rstrip('\r\n')
+        with open('model-H.crd', 'a') as f:
+            f.write(box_line + '\n')
 
     subprocess.call( _ks_config )
 

@@ -762,7 +762,21 @@ void ARRAY_CORRECT_U(psnd_complex* U, size_t N);
 
 void ARRAY_TRANSPOSE(psnd_real* A, size_t N1, size_t N2);
 
+// This function will return the conjugate transpose of A
 void ARRAY_TRANSPOSE(psnd_complex* A, size_t N1, size_t N2);
+
+// Transpose of complex matrix without conjugation (needed for General_soc derivative transforms)
+void ARRAY_TRANSPOSE_complex(psnd_complex* A, size_t N1, size_t N2);
+
+
+// Commutator: [A,B] = AB - BA
+void ARRAY_COMMUNTATOR(psnd_real* C, psnd_real* A, psnd_real* B, size_t N);
+
+void ARRAY_COMMUNTATOR(psnd_complex* C, psnd_complex* A, psnd_complex* B, size_t N);
+
+void ARRAY_COMMUNTATOR(psnd_complex* C, psnd_complex* A, psnd_real* B, size_t N);
+
+void ARRAY_COMMUNTATOR(psnd_complex* C, psnd_real* A, psnd_complex* B, size_t N);
 
 
 };  // namespace PROJECT_NS

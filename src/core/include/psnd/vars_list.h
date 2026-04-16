@@ -1554,6 +1554,86 @@ namespace model {
 extern VARIABLE<psnd_real> x_sigma;
 };  // namespace model
 };  // namespace DATA
+// --- SOC / General_soc additions ---
+namespace DATA {
+namespace model {
+extern VARIABLE<psnd_complex> Hsysc;
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+extern VARIABLE<psnd_complex> V_prev;
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+extern VARIABLE<psnd_real> nacmat;
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+namespace rep {
+extern VARIABLE<psnd_complex> Ec;
+};  // namespace rep
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+namespace rep {
+extern VARIABLE<psnd_complex> Tc;
+};  // namespace rep
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+namespace rep {
+extern VARIABLE<psnd_complex> Toldc;
+};  // namespace rep
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+namespace rep {
+extern VARIABLE<psnd_complex> dEc;
+};  // namespace rep
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace model {
+namespace rep {
+extern VARIABLE<psnd_complex> ddEc;
+};  // namespace rep
+};  // namespace model
+};  // namespace DATA
+namespace DATA {
+namespace integrator {
+namespace tmp {
+extern VARIABLE<psnd_complex> commutator_d_V;
+};  // namespace tmp
+};  // namespace integrator
+};  // namespace DATA
+namespace DATA {
+namespace integrator {
+namespace tmp {
+extern VARIABLE<psnd_real> venac;
+};  // namespace tmp
+};  // namespace integrator
+};  // namespace DATA
+namespace DATA {
+namespace integrator {
+namespace tmp {
+extern VARIABLE<psnd_complex> vedEc;
+};  // namespace tmp
+};  // namespace integrator
+};  // namespace DATA
+namespace DATA {
+namespace integrator {
+namespace tmp {
+extern VARIABLE<psnd_complex> TtToldc;
+};  // namespace tmp
+};  // namespace integrator
+};  // namespace DATA
+// --- end SOC additions ---
 namespace DATA {
 namespace random {
 extern VARIABLE<psnd_int> seed;

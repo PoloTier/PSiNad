@@ -582,4 +582,38 @@ void ARRAY_TRANSPOSE(psnd_complex* A, size_t N1, size_t N2) {
     Map_Anew = Map_A.adjoint().eval();
 }
 
+void ARRAY_TRANSPOSE_complex(psnd_complex* A, size_t N1, size_t N2) {
+    MapMXc Map_A(A, N1, N2);
+    MapMXc Map_Anew(A, N2, N1);
+    Map_Anew = Map_A.transpose().eval();
+}
+
+void ARRAY_COMMUNTATOR(psnd_real* C, psnd_real* A, psnd_real* B, size_t N) {
+    MapMXr MapA(A, N, N);
+    MapMXr MapB(B, N, N);
+    MapMXr MapC(C, N, N);
+    MapC = (MapA * MapB - MapB * MapA).eval();
+}
+
+void ARRAY_COMMUNTATOR(psnd_complex* C, psnd_complex* A, psnd_complex* B, size_t N) {
+    MapMXc MapA(A, N, N);
+    MapMXc MapB(B, N, N);
+    MapMXc MapC(C, N, N);
+    MapC = (MapA * MapB - MapB * MapA).eval();
+}
+
+void ARRAY_COMMUNTATOR(psnd_complex* C, psnd_complex* A, psnd_real* B, size_t N) {
+    MapMXc MapA(A, N, N);
+    MapMXr MapB(B, N, N);
+    MapMXc MapC(C, N, N);
+    MapC = (MapA * MapB - MapB * MapA).eval();
+}
+
+void ARRAY_COMMUNTATOR(psnd_complex* C, psnd_real* A, psnd_complex* B, size_t N) {
+    MapMXr MapA(A, N, N);
+    MapMXc MapB(B, N, N);
+    MapMXc MapC(C, N, N);
+    MapC = (MapA * MapB - MapB * MapA).eval();
+}
+
 };  // namespace PROJECT_NS

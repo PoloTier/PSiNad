@@ -357,6 +357,20 @@ VARIABLE<psnd_int>     NAME_WRAPPER(random::seed, &shape_1, "");
 
 // custom variables
 
+// --- SOC / General_soc additions ---
+VARIABLE<psnd_complex> NAME_WRAPPER(model::Hsysc, &shape_FF, "complex system Hamiltonian for SOC");
+VARIABLE<psnd_complex> NAME_WRAPPER(model::V_prev, &shape_PFF, "previous step V for SOC sign-continuity tracking");
+VARIABLE<psnd_real>    NAME_WRAPPER(model::nacmat, &shape_PNFF, "NAC matrix in General_soc representation");
+VARIABLE<psnd_complex> NAME_WRAPPER(model::rep::Ec, &shape_PFF, "complex representation diagonal energy");
+VARIABLE<psnd_complex> NAME_WRAPPER(model::rep::Tc, &shape_PFF, "complex ADT matrix");
+VARIABLE<psnd_complex> NAME_WRAPPER(model::rep::Toldc, &shape_PFF, "previous complex ADT matrix");
+VARIABLE<psnd_complex> NAME_WRAPPER(model::rep::dEc, &shape_PNFF, "complex dE");
+VARIABLE<psnd_complex> NAME_WRAPPER(model::rep::ddEc, &shape_PNNFF, "complex ddE");
+VARIABLE<psnd_complex> NAME_WRAPPER(integrator::tmp::commutator_d_V, &shape_FF, "[nac, Vc] commutator for General_soc");
+VARIABLE<psnd_real>    NAME_WRAPPER(integrator::tmp::venac, &shape_FF, "sum_j (p_j/m_j) * nac_j");
+VARIABLE<psnd_complex> NAME_WRAPPER(integrator::tmp::vedEc, &shape_FF, "v * dEc");
+VARIABLE<psnd_complex> NAME_WRAPPER(integrator::tmp::TtToldc, &shape_FF, "Tc^T * Toldc");
+// --- end SOC additions ---
 
 };  // namespace DATA
 

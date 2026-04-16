@@ -71,7 +71,12 @@ void Kernel_ExactPropagator::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
             EMat     = DS->def(DATA::model::rep::E);
             ForceMat = DS->def(DATA::model::rep::dE);
             break;
+        case RepresentationPolicy::General_soc:
+            EMatc     = DS->def(DATA::model::rep::Ec);
+            ForceMatc = DS->def(DATA::model::rep::dEc);
+            break;
     }
+    Tc = DS->def(DATA::model::rep::Tc);
 }
 
 Status& Kernel_ExactPropagator::initializeKernel_impl(Status& stat) { return stat; }
@@ -98,6 +103,23 @@ Status& Kernel_ExactPropagator::executeKernel_impl(Status& stat) {
         auto vpes     = this->vpes.subspan(iP, 1);
         auto alpha    = this->alpha.subspan(iP, 1);
 
+        // --- General_soc short-circuit: compute fproj via complex ForceMatc ---
+        bool is_general_soc = (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc);
+        if (is_general_soc) {
+            auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+            auto ForceMatc = this->ForceMatc.subspan(iP * Dimension::NFF, Dimension::NFF);
+
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,  //
+                                             Kernel_Representation::inp_repr_type,
+                                             RepresentationPolicy::General_soc,  //
+                                             SpacePolicy::L);
+            for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
+                auto dVcj = ForceMatc.subspan(jFF, Dimension::FF);
+                fproj[j] = std::real(ARRAY_TRACE2_OFFD(rho_nuc.data(), dVcj.data(), Dimension::F, Dimension::F));
+            }
+            // Continue below with shared exact-propagator momentum update (B_vec/e_pall/alpha_pall/...)
+        } else {
+            // --- end General_soc short-circuit ---
         // std::cout << "[Kernel_ExactPropagator] Before exact propagator: rho_nuc: " <<
         //     rho_nuc[0] << ", " << rho_nuc[1] << ", " << rho_nuc[2] << ", " << rho_nuc[3] << "\n";
 
@@ -110,6 +132,7 @@ Status& Kernel_ExactPropagator::executeKernel_impl(Status& stat) {
             auto dVj = ForceMat.subspan(jFF, Dimension::FF);
             // f[j]     = dVj[(occ_nuc[0]) * Dimension::Fadd1];
             fproj[j] = std::real(ARRAY_TRACE2_OFFD(rho_nuc.data(), dVj.data(), Dimension::F, Dimension::F));
+        }
         }
         psnd_real B_vec[Dimension::N]; // 局部变量 B_vec
         for (int j = 0; j < Dimension::N; ++j) {
@@ -175,10 +198,18 @@ Status& Kernel_ExactPropagator::executeKernel_impl(Status& stat) {
             }
         };
 
-        Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
-                                    Kernel_Representation::nuc_repr_type,    //
-                                    Kernel_Representation::inp_repr_type,    //
-                                    SpacePolicy::L);
+        if (is_general_soc) {
+            auto Tc = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,  //
+                                             RepresentationPolicy::General_soc,
+                                             Kernel_Representation::inp_repr_type,  //
+                                             SpacePolicy::L);
+        } else {
+            Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
+                                        Kernel_Representation::nuc_repr_type,    //
+                                        Kernel_Representation::inp_repr_type,    //
+                                        SpacePolicy::L);
+        }
         // std::cout << "[Kernel_ExactPropagator] scale: " << scale << "\n";
         // std::cout << "occ_nuc after exact propagator: " << occ_nuc[0] << std::endl;
 

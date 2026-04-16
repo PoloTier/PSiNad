@@ -49,7 +49,13 @@ void Kernel_Elec_Switch::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
             EMat     = DS->def(DATA::model::rep::E);
             ForceMat = DS->def(DATA::model::rep::dE);
             break;
+        case RepresentationPolicy::General_soc:
+            EMatc     = DS->def(DATA::model::rep::Ec);
+            ForceMatc = DS->def(DATA::model::rep::dEc);
+            break;
     }
+    // Always bind Tc for General_soc path (no-op when not used)
+    Tc = DS->def(DATA::model::rep::Tc);
 }
 
 Status& Kernel_Elec_Switch::initializeKernel_impl(Status& stat) {
@@ -73,6 +79,72 @@ Status& Kernel_Elec_Switch::executeKernel_impl(Status& stat) {
         auto H        = this->H.subspan(iP * Dimension::FF, Dimension::FF);  // ????
         auto EMat     = this->EMat.subspan(iP * Dimension::FF, Dimension::FF);
         auto ForceMat = this->ForceMat.subspan(iP * Dimension::NFF, Dimension::NFF);
+
+        // --- General_soc short-circuit (complex SOC path) ---
+        if (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc) {
+            auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+            auto EMatc     = this->EMatc.subspan(iP * Dimension::FF, Dimension::FF);
+            auto ForceMatc = this->ForceMatc.subspan(iP * Dimension::NFF, Dimension::NFF);
+
+            Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,  //
+                                             Kernel_Representation::inp_repr_type,
+                                             RepresentationPolicy::General_soc,  //
+                                             SpacePolicy::L);
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,  //
+                                             Kernel_Representation::inp_repr_type,
+                                             RepresentationPolicy::General_soc,  //
+                                             SpacePolicy::L);
+
+            psnd_int  from = occ_nuc[0], to = occ_nuc[0];
+            psnd_real Efrom, Eto;
+            Efrom = elec_utils::calc_ElectricalEnergy(EMatc.data(), rho_nuc.data(), occ_nuc[0]);
+
+            switch (hopping_choose_type) {
+                case 0: to = elec_utils::max_choose(rho_ele.data()); break;
+                case 1: to = elec_utils::max_choose(rho_nuc.data()); break;
+                case 2: to = elec_utils::hopping_choose(rho_ele.data(), H.data(), occ_nuc[0], dt_ptr[0]); break;
+                case 3: to = elec_utils::pop_choose(rho_ele.data()); break;
+                case 4: to = elec_utils::pop_choose(rho_nuc.data()); break;
+                case 5: to = elec_utils::pop_neg_choose(rho_nuc.data()); break;
+                default: break;
+            }
+            Eto = elec_utils::calc_ElectricalEnergy(EMatc.data(), rho_nuc.data(), to);
+
+            switch (hopping_direction_type) {
+                case 0:
+                    elec_utils::hopping_direction(direction.data(), EMatc.data(), ForceMatc.data(), rho_ele.data(),
+                                                  occ_nuc[0], to);
+                    break;
+                case 1:
+                    elec_utils::hopping_direction(direction.data(), ForceMatc.data(), occ_nuc[0], to);
+                    break;
+                case 2:
+                    for (int j = 0; j < Dimension::N; ++j) direction[j] = p[j];
+                    break;
+                case 3:
+                    for (int j = 0; j < Dimension::N; ++j)
+                        direction[j] = std::real(ForceMatc[j * Dimension::FF + to * Dimension::Fadd1] -
+                                                 ForceMatc[j * Dimension::FF + occ_nuc[0] * Dimension::Fadd1]);
+                    break;
+            }
+
+            if (occ_nuc[0] != to) {
+                occ_nuc[0] = elec_utils::hopping_impulse(direction.data(), p.data(), m.data(),  //
+                                                         Efrom, Eto, occ_nuc[0], to, reflect);
+            }
+            Epot[0] = vpes[0] + ((occ_nuc[0] == to) ? Eto : Efrom);
+
+            Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,  //
+                                             RepresentationPolicy::General_soc,
+                                             Kernel_Representation::inp_repr_type,  //
+                                             SpacePolicy::L);
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,  //
+                                             RepresentationPolicy::General_soc,
+                                             Kernel_Representation::inp_repr_type,  //
+                                             SpacePolicy::L);
+            continue;
+        }
+        // --- end General_soc short-circuit ---
 
         //////////////////////////////////////////////////////////////////////
         // switching is taken on nuc_repr_type representation

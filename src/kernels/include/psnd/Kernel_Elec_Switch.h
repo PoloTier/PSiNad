@@ -44,6 +44,10 @@ class Kernel_Elec_Switch final : public Kernel {
     span<psnd_complex> rho_nuc;
     span<psnd_complex> H;
 
+    // --- General_soc additions ---
+    span<psnd_complex> Tc, EMatc, ForceMatc;
+    // --- end General_soc additions ---
+
     virtual void setInputParam_impl(std::shared_ptr<Param> PM);
 
     virtual void setInputDataSet_impl(std::shared_ptr<DataSet> DS);

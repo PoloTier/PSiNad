@@ -148,12 +148,31 @@ class elec_utils {
         switch (Kernel_NAForce::NAForce_type) {
             case NAForcePolicy::BO:
             case NAForcePolicy::NAFEXACT:
-            case NAForcePolicy::NAF2: 
+            case NAForcePolicy::NAF2:
             case NAForcePolicy::NAF: {
                 Ecalc = E[occ * Dimension::Fadd1];
                 break;
             }
             default: {  // EHR, MIX, SD (Eto == Efrom will skip hopping procedure)
+                Ecalc = std::real(ARRAY_TRACE2(wrho, E, Dimension::F, Dimension::F));
+                break;
+            }
+        }
+        return Ecalc;
+    }
+
+    // Complex overload for General_soc representation (E is complex)
+    static double calc_ElectricalEnergy(psnd_complex* E, psnd_complex* wrho, int occ) {
+        double Ecalc = 0.0e0;
+        switch (Kernel_NAForce::NAForce_type) {
+            case NAForcePolicy::BO:
+            case NAForcePolicy::NAFEXACT:
+            case NAForcePolicy::NAF2:
+            case NAForcePolicy::NAF: {
+                Ecalc = std::real(E[occ * Dimension::Fadd1]);
+                break;
+            }
+            default: {
                 Ecalc = std::real(ARRAY_TRACE2(wrho, E, Dimension::F, Dimension::F));
                 break;
             }
@@ -214,9 +233,45 @@ class elec_utils {
         return 0;
     }
 
+    // Complex overload for General_soc representation (E, dE are complex)
+    static int calc_distorted_force(psnd_real*    f1,    // to be calculated
+                                    psnd_complex* E,     // (input)
+                                    psnd_complex* dE,    // (input)
+                                    psnd_complex* wrho,  // distorted rho
+                                    psnd_complex* rho,   // rho_ele
+                                    double        alpha) {
+        psnd_real L            = 1.0e0 - log(std::abs(alpha));
+        psnd_real rate_default = (L == 1.0e0) ? 1.0e0 : 0.0e0;
+
+        double Ew = std::real(ARRAY_TRACE2(wrho, E, Dimension::F, Dimension::F));
+        for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
+            psnd_complex* dEj = dE + jFF;
+            f1[j]             = 0.0e0;
+            for (int i = 0, ii = 0; i < Dimension::F; ++i, ii += Dimension::Fadd1) {
+                double rate  = ((std::real(rho[ii]) == 0.0e0) ? rate_default : std::real(wrho[ii] / rho[ii]));
+                double coeff = std::real(E[ii] - (E[ii] - Ew) * L * rate);
+                for (int k = 0, kk = 0; k < Dimension::F; ++k, kk += Dimension::Fadd1) {
+                    if (i == k) continue;
+                    f1[j] +=
+                        coeff * std::real(dEj[i * Dimension::F + k] / (E[kk] - E[ii]) * wrho[k * Dimension::F + i] -
+                                          dEj[k * Dimension::F + i] / (E[ii] - E[kk]) * wrho[i * Dimension::F + k]);
+                }
+            }
+        }
+        return 0;
+    }
+
     static void hopping_direction(psnd_real* direction, psnd_real* dE, int from, int to) {
         if (to == from) return;
         for (int i = 0; i < Dimension::N; ++i) { direction[i] = dE[i * Dimension::FF + from * Dimension::F + to]; }
+    }
+
+    // Complex overload for General_soc (dE is complex; take real part for the direction)
+    static void hopping_direction(psnd_real* direction, psnd_complex* dE, int from, int to) {
+        if (to == from) return;
+        for (int i = 0; i < Dimension::N; ++i) {
+            direction[i] = std::real(dE[i * Dimension::FF + from * Dimension::F + to]);
+        }
     }
 
     static void hopping_direction(psnd_real* direction, psnd_real* E, psnd_real* dE, psnd_complex* rho, int from,
@@ -235,6 +290,25 @@ class elec_utils {
                     direction[i] -=
                         std::real(rho[to * Dimension::F + k] * dE[i * Dimension::FF + k * Dimension::F + to]) /
                         (E[to * Dimension::Fadd1] - E[k * Dimension::Fadd1]);
+        }
+    }
+
+    // Complex overload for General_soc (E, dE are complex)
+    static void hopping_direction(psnd_real* direction, psnd_complex* E, psnd_complex* dE, psnd_complex* rho, int from,
+                                  int to) {
+        if (to == from) return;
+        for (int i = 0; i < Dimension::N; ++i) {
+            direction[i] = 0.0;
+            for (int k = 0; k < Dimension::F; ++k)
+                if (k != from)
+                    direction[i] += std::real(
+                        (rho[from * Dimension::F + k] * dE[i * Dimension::FF + k * Dimension::F + from]) /
+                        (E[from * Dimension::Fadd1] - E[k * Dimension::Fadd1]));
+            for (int k = 0; k < Dimension::F; ++k)
+                if (k != to)
+                    direction[i] -= std::real(
+                        (rho[to * Dimension::F + k] * dE[i * Dimension::FF + k * Dimension::F + to]) /
+                        (E[to * Dimension::Fadd1] - E[k * Dimension::Fadd1]));
         }
     }
 

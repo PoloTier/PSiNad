@@ -59,6 +59,10 @@ class Kernel_ExactPropagator : public Kernel {
     span<psnd_real>    alpha;
     span<psnd_complex> wrho;
 
+    // --- General_soc additions ---
+    span<psnd_complex> Tc, ForceMatc, EMatc;
+    // --- end General_soc additions ---
+
     NAForcePolicy::_type NAForce_type;
 
 

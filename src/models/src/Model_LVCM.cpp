@@ -1,5 +1,7 @@
 #include "psnd/Model_LVCM.h"
 
+#include <complex>
+
 #include "psnd/Kernel_Random.h"
 #include "psnd/debug_utils.h"
 #include "psnd/hash_fnv1a.h"
@@ -23,6 +25,16 @@ void Model_LVCM::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     Qmat = DS->def(DATA::model::Qmat);
     Tmod = DS->def(DATA::model::Tmod);
     memset(Hsys.data(), 0, Dimension::FF * sizeof(psnd_real));
+
+    // --- SOC additions: complex Hamiltonian / V / dV + nac matrix ---
+    Hsysc  = DS->def(DATA::model::Hsysc);
+    Vc     = DS->def(DATA::model::Vc);
+    dVc    = DS->def(DATA::model::dVc);
+    nacmat = DS->def(DATA::model::nacmat);
+    nac    = DS->def(DATA::model::rep::nac);
+    memset(Hsysc.data(), 0, Dimension::FF * sizeof(psnd_complex));
+    // --- end SOC additions ---
+
     switch (lvcm_type) {
         case LVCMPolicy::PYR3: {
             psnd_assert(Dimension::N == 3, "Dimension Error");
@@ -279,6 +291,146 @@ void Model_LVCM::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
         case LVCMPolicy::BEN5: {
             break;
         }
+        case LVCMPolicy::SOC1: {
+            psnd_assert(Dimension::N == 6, "Dimension Error");
+            psnd_assert(Dimension::F == 11, "Dimension Error");
+            double H_unit = phys::au_2_ev;
+
+            N_mode = 4;
+
+            std::complex<double> E_data[121];
+            for (int i = 0; i < 121; ++i) E_data[i] = std::complex<double>(0.0, 0.0);
+            // diagonal energies (eV)
+            E_data[0 * 11 + 0]   = 2.81;
+            E_data[1 * 11 + 1]   = 2.81;
+            E_data[2 * 11 + 2]   = 2.81;
+            E_data[3 * 11 + 3]   = 2.93;
+            E_data[4 * 11 + 4]   = 2.93;
+            E_data[5 * 11 + 5]   = 2.93;
+            E_data[6 * 11 + 6]   = 2.94;
+            E_data[7 * 11 + 7]   = 3.11;
+            E_data[8 * 11 + 8]   = 3.22;
+            E_data[9 * 11 + 9]   = 3.22;
+            E_data[10 * 11 + 10] = 3.22;
+            // SOC off-diagonals
+            E_data[7 * 11 + 8]   = (0.0274 - phys::math::im * 0.0056);
+            E_data[7 * 11 + 10]  = (0.0274 + phys::math::im * 0.0056);
+            E_data[8 * 11 + 7]   = (0.0274 + phys::math::im * 0.0056);
+            E_data[10 * 11 + 7]  = (0.0274 - phys::math::im * 0.0056);
+            E_data[0 * 11 + 7]   = (-0.0719 - phys::math::im * 0.0196);
+            E_data[2 * 11 + 7]   = (-0.0719 + phys::math::im * 0.0196);
+            E_data[7 * 11 + 0]   = (-0.0719 + phys::math::im * 0.0196);
+            E_data[7 * 11 + 2]   = (-0.0719 - phys::math::im * 0.0196);
+            E_data[3 * 11 + 6]   = (0.0769 + phys::math::im * 0.0186);
+            E_data[5 * 11 + 6]   = (0.0769 - phys::math::im * 0.0186);
+            E_data[6 * 11 + 3]   = (0.0769 - phys::math::im * 0.0186);
+            E_data[6 * 11 + 5]   = (0.0769 + phys::math::im * 0.0186);
+            E_data[0 * 11 + 4]   = (0.0719 + phys::math::im * 0.0177);
+            E_data[1 * 11 + 3]   = -(0.0719 - phys::math::im * 0.0177);
+            E_data[1 * 11 + 5]   = (0.0719 + phys::math::im * 0.0177);
+            E_data[2 * 11 + 4]   = -(0.0719 - phys::math::im * 0.0177);
+            E_data[4 * 11 + 0]   = (0.0719 - phys::math::im * 0.0177);
+            E_data[3 * 11 + 1]   = -(0.0719 + phys::math::im * 0.0177);
+            E_data[5 * 11 + 1]   = (0.0719 - phys::math::im * 0.0177);
+            E_data[4 * 11 + 2]   = -(0.0719 + phys::math::im * 0.0177);
+            E_data[3 * 11 + 9]   = (-0.0270 + phys::math::im * 0.0046);
+            E_data[4 * 11 + 8]   = -(-0.0270 - phys::math::im * 0.0046);
+            E_data[4 * 11 + 10]  = (-0.0270 + phys::math::im * 0.0046);
+            E_data[5 * 11 + 9]   = -(-0.0270 - phys::math::im * 0.0046);
+            E_data[9 * 11 + 3]   = (-0.0270 - phys::math::im * 0.0046);
+            E_data[8 * 11 + 4]   = -(-0.0270 + phys::math::im * 0.0046);
+            E_data[10 * 11 + 4]  = (-0.0270 - phys::math::im * 0.0046);
+            E_data[9 * 11 + 5]   = -(-0.0270 + phys::math::im * 0.0046);
+
+            double w_data[6] = {0.0116, 0.0188, 0.0229, 0.0792, 0.0118, 0.0601};
+            double kcoeff_data[44] = {
+                -0.0161, -0.0161, -0.0161,  0.0190,  0.0190,  0.0190, -0.0172,  0.0187, 0.0015, 0.0015, 0.0015,  // x0
+                 0.0002,  0.0002,  0.0002, -0.0006, -0.0006, -0.0006,  0.0090,  0.0091, 0.0056, 0.0056, 0.0056,  // x1
+                -0.0261, -0.0261, -0.0261, -0.0322, -0.0322, -0.0322, -0.0289, -0.0271, 0.0133, 0.0133, 0.0133,  // x2
+                -0.0196, -0.0196, -0.0196,  0.0433,  0.0433,  0.0433, -0.0187,  0.0404, 0.0033, 0.0033, 0.0033,  // x3
+            };
+            double lcoeff_data[242];
+            for (int i = 0; i < 242; ++i) lcoeff_data[i] = 0.0;
+            lcoeff_data[0 * 121 + 6 * 11 + 7] = 0.0114;
+            lcoeff_data[1 * 121 + 6 * 11 + 7] = 0.0237;
+            lcoeff_data[0 * 121 + 7 * 11 + 6] = 0.0114;
+            lcoeff_data[1 * 121 + 7 * 11 + 6] = 0.0237;
+            lcoeff_data[0 * 121 + 0 * 11 + 3] = 0.0086;
+            lcoeff_data[1 * 121 + 0 * 11 + 3] = 0.0190;
+            lcoeff_data[0 * 121 + 3 * 11 + 0] = 0.0086;
+            lcoeff_data[1 * 121 + 3 * 11 + 0] = 0.0190;
+            lcoeff_data[0 * 121 + 1 * 11 + 4] = 0.0086;
+            lcoeff_data[1 * 121 + 1 * 11 + 4] = 0.0190;
+            lcoeff_data[0 * 121 + 4 * 11 + 1] = 0.0086;
+            lcoeff_data[1 * 121 + 4 * 11 + 1] = 0.0190;
+            lcoeff_data[0 * 121 + 2 * 11 + 5] = 0.0086;
+            lcoeff_data[1 * 121 + 2 * 11 + 5] = 0.0190;
+            lcoeff_data[0 * 121 + 5 * 11 + 2] = 0.0086;
+            lcoeff_data[1 * 121 + 5 * 11 + 2] = 0.0190;
+
+            for (int i = 0; i < Dimension::FF; ++i) Hsysc[i] = E_data[i] / H_unit;
+            for (int j = 0; j < Dimension::N; ++j) w[j] = w_data[j] / H_unit;
+            for (int j = 0, idxkcoeff = 0, idxlcoeff = 0; j < Dimension::N; ++j) {
+                for (int i = 0, ik = 0; i < Dimension::F; ++i) {
+                    for (int k = 0; k < Dimension::F; ++k, ++ik) {
+                        Qmat[j * Dimension::FF + ik] =
+                            (j < N_mode) ? ((i == k) ? kcoeff_data[idxkcoeff++] : 0.0e0)
+                                         : lcoeff_data[idxlcoeff++];
+                        Qmat[j * Dimension::FF + ik] /= H_unit;
+                        Qmat[j * Dimension::FF + ik] *= std::sqrt(w[j]);
+                    }
+                }
+            }
+            break;
+        }
+        case LVCMPolicy::SOCtest: {
+            psnd_assert(Dimension::N == 3, "Dimension Error");
+            psnd_assert(Dimension::F == 3, "Dimension Error");
+            double H_unit = phys::au_2_ev;
+
+            N_mode = 2;
+
+            std::complex<double> E_data[9];
+            for (int i = 0; i < 9; ++i) E_data[i] = std::complex<double>(0.0, 0.0);
+            E_data[0 * 3 + 0] = 0.0;
+            E_data[1 * 3 + 1] = 1.0;
+            E_data[2 * 3 + 2] = 2.0;
+            E_data[0 * 3 + 1] = (1.0 - phys::math::im * 0.5);
+            E_data[1 * 3 + 0] = (1.0 + phys::math::im * 0.5);
+            E_data[0 * 3 + 2] = (2.0 - phys::math::im * 1.0);
+            E_data[2 * 3 + 0] = (2.0 + phys::math::im * 1.0);
+            E_data[1 * 3 + 2] = (0.1 + phys::math::im * 2.0);
+            E_data[2 * 3 + 1] = (0.1 - phys::math::im * 2.0);
+
+            double w_data[3] = {0.01, 0.02, 0.03};
+            double kcoeff_data[6] = {
+                -0.0161, 0.0190, 0.02,   // x0
+                 0.0002, -0.0006, 0.01,  // x1
+            };
+            double lcoeff_data[9];
+            for (int i = 0; i < 9; ++i) lcoeff_data[i] = 0.0;
+            lcoeff_data[0 * 3 + 1 * 1 + 0] = 0.01;
+            lcoeff_data[1 * 3 + 0 * 1 + 0] = 0.01;
+            lcoeff_data[0 * 3 + 2 * 1 + 0] = 0.02;
+            lcoeff_data[2 * 3 + 0 * 1 + 0] = 0.02;
+            lcoeff_data[1 * 3 + 2 * 1 + 0] = 0.03;
+            lcoeff_data[2 * 3 + 1 * 1 + 0] = 0.03;
+
+            for (int i = 0; i < Dimension::FF; ++i) Hsysc[i] = E_data[i] / H_unit;
+            for (int j = 0; j < Dimension::N; ++j) w[j] = w_data[j] / H_unit;
+            for (int j = 0, idxkcoeff = 0, idxlcoeff = 0; j < Dimension::N; ++j) {
+                for (int i = 0, ik = 0; i < Dimension::F; ++i) {
+                    for (int k = 0; k < Dimension::F; ++k, ++ik) {
+                        Qmat[j * Dimension::FF + ik] =
+                            (j < N_mode) ? ((i == k) ? kcoeff_data[idxkcoeff++] : 0.0e0)
+                                         : lcoeff_data[idxlcoeff++];
+                        Qmat[j * Dimension::FF + ik] /= H_unit;
+                        Qmat[j * Dimension::FF + ik] *= std::sqrt(w[j]);
+                    }
+                }
+            }
+            break;
+        }
         case LVCMPolicy::Read: {
             std::string   lvcm_file = _param->get_string({"model.lvcm_file"}, LOC(), "lvcm.dat");
             std::ifstream ifs(lvcm_file);
@@ -425,6 +577,46 @@ Status &Model_LVCM::executeKernel_impl(Status &stat) {
             for (int i = 0; i < Dimension::NFF; ++i) dV[i] = Qmat[i];
             // ddV = 0;
         }
+
+        // --- SOC path: populate complex Vc/dVc and nacmat for General_soc representation ---
+        if (lvcm_type == LVCMPolicy::SOC1 || lvcm_type == LVCMPolicy::SOCtest) {
+            auto Vc_     = this->Vc.subspan(iP * Dimension::FF, Dimension::FF);
+            auto dVc_    = this->dVc.subspan(iP * Dimension::NFF, Dimension::NFF);
+            auto nacmat_ = this->nacmat.subspan(iP * Dimension::NFF, Dimension::NFF);
+            auto nac_    = this->nac.subspan(iP * Dimension::NFF, Dimension::NFF);
+
+            memset(Vc_.data(), 0, Dimension::FF * sizeof(psnd_complex));
+            for (int ik = 0; ik < Dimension::FF; ++ik) Vc_[ik] = Hsysc[ik];
+
+            for (int j = 0, jFF = 0; j < N_mode; ++j, jFF += Dimension::FF) {
+                for (int i = 0, ii = 0; i < Dimension::F; ++i, ii += Dimension::Fadd1) {
+                    Vc_[ii] += Qmat[jFF + ii] * x[j];
+                }
+            }
+            for (int j = N_mode, jik = N_mode * Dimension::FF; j < Dimension::N; ++j) {
+                for (int ik = 0; ik < Dimension::FF; ++ik, ++jik) {
+                    Vc_[ik] += Qmat[jik] * x[j];
+                }
+            }
+            if (count_exec == 0) {
+                for (int i = 0; i < Dimension::NFF; ++i) dVc_[i] = Qmat[i];
+            }
+
+            // nacmat is hardcoded only for SOCtest; SOC1 leaves it zero
+            memset(nacmat_.data(), 0, Dimension::NFF * sizeof(psnd_real));
+            if (lvcm_type == LVCMPolicy::SOCtest) {
+                for (int i = 0; i < Dimension::N; ++i) {
+                    nacmat_[i * Dimension::FF + 0 * Dimension::F + 1] = 0.2;
+                    nacmat_[i * Dimension::FF + 1 * Dimension::F + 0] = -0.2;
+                    nacmat_[i * Dimension::FF + 0 * Dimension::F + 2] = 0.5;
+                    nacmat_[i * Dimension::FF + 2 * Dimension::F + 0] = -0.5;
+                    nacmat_[i * Dimension::FF + 1 * Dimension::F + 2] = -0.1;
+                    nacmat_[i * Dimension::FF + 2 * Dimension::F + 1] = 0.1;
+                }
+            }
+            for (int i = 0; i < Dimension::NFF; ++i) nac_[i] = nacmat_[i];
+        }
+        // --- end SOC path ---
     }
     return stat;
 }

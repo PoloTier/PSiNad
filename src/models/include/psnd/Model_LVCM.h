@@ -20,6 +20,8 @@ DEFINE_POLICY(LVCMPolicy,  //
               CED2,        // 2-state atom-in-cavity model
               CED3,        // 3-state atom-in-cavity model
               PYR2CED,     // pyrazine-in-cavity model
+              SOC1,        // 6-mode 11-state ReBr(CO)3bpy SOC model (hardcoded)
+              SOCtest,     // 3-mode 3-state SOC test model (hardcoded)
               Read);       //
 
 class Model_LVCM final : public Model {
@@ -52,6 +54,13 @@ class Model_LVCM final : public Model {
     span<psnd_real> V, dV, ddV;
 
     span<psnd_real> Kmat, Qmat, Tmod;
+
+    // --- SOC (complex) additions ---
+    span<psnd_complex> Hsysc;
+    span<psnd_complex> Vc, dVc;
+    span<psnd_real>    nacmat;
+    span<psnd_real>    nac;
+    // --- end SOC additions ---
 
     // int N_ligh;
     // N = N_mode + N_coup + N_ligh

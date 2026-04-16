@@ -69,6 +69,10 @@ class Kernel_NAForce : public Kernel {
     span<psnd_real>    alpha;
     span<psnd_complex> wrho;
 
+    // --- General_soc (complex SOC representation) additions ---
+    span<psnd_complex> Vc, dVc, dEc, Tc, ForceMatc, EMatc;
+    // --- end General_soc additions ---
+
     span<psnd_real> Epot, vpes;
     span<psnd_real> dt_ptr;
 

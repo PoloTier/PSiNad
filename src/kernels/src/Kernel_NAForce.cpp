@@ -67,7 +67,17 @@ void Kernel_NAForce::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
             EMat     = DS->def(DATA::model::rep::E);
             ForceMat = DS->def(DATA::model::rep::dE);
             break;
+        case RepresentationPolicy::General_soc:
+            // Force/energy matrices in General_soc live in their complex counterparts
+            EMatc     = DS->def(DATA::model::rep::Ec);
+            ForceMatc = DS->def(DATA::model::rep::dEc);
+            break;
     }
+    // Always bind complex scaffolding (zero-filled when not used)
+    Vc  = DS->def(DATA::model::Vc);
+    dVc = DS->def(DATA::model::dVc);
+    Tc  = DS->def(DATA::model::rep::Tc);
+    dEc = DS->def(DATA::model::rep::dEc);
 }
 
 Status& Kernel_NAForce::initializeKernel_impl(Status& stat) {
@@ -98,6 +108,44 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
         auto V        = this->V.subspan(iP * Dimension::FF, Dimension::FF);
         auto vpes     = this->vpes.subspan(iP, 1);
         auto alpha    = this->alpha.subspan(iP, 1);
+
+        // --- General_soc short-circuit (complex SOC path) ---
+        if (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc) {
+            auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+            auto ForceMatc = this->ForceMatc.subspan(iP * Dimension::NFF, Dimension::NFF);
+
+            psnd_complex rho_Q1[Dimension::FF];
+            switch (NAForce_type) {
+                case NAForcePolicy::EHR: {
+                    for (int i = 0; i < Dimension::FF; ++i) rho_Q1[i] = rho_nuc[i];
+                    Kernel_Representation::transform(rho_Q1, Tc.data(), Dimension::F,  //
+                                                     Kernel_Representation::inp_repr_type,
+                                                     RepresentationPolicy::General_soc,  //
+                                                     SpacePolicy::L);
+                    break;
+                }
+                case NAForcePolicy::BO:
+                case NAForcePolicy::NAFEXACT:
+                default: {
+                    // Build |occ><occ| in Adiabatic, transform to General_soc
+                    for (int i = 0; i < Dimension::FF; ++i) rho_Q1[i] = psnd_complex(0.0, 0.0);
+                    rho_Q1[occ_nuc[0] * Dimension::F + occ_nuc[0]] = psnd_complex(1.0, 0.0);
+                    Kernel_Representation::transform(rho_Q1, Tc.data(), Dimension::F,  //
+                                                     RepresentationPolicy::Adiabatic,
+                                                     RepresentationPolicy::General_soc,  //
+                                                     SpacePolicy::L);
+                    break;
+                }
+            }
+            for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
+                auto dVcj = ForceMatc.subspan(jFF, Dimension::FF);
+                f[j] = std::real(ARRAY_TRACE2(rho_Q1, dVcj.data(), Dimension::F, Dimension::F));
+            }
+            for (int j = 0; j < Dimension::N; ++j) f[j] += grad[j];
+            for (int j = 0; j < Dimension::N; ++j) f[j] += fadd[j];
+            continue;
+        }
+        // --- end General_soc short-circuit ---
 
         /////////////////////////////////////////////////////////////////
         // smooth dynamics force

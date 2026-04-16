@@ -52,14 +52,35 @@ class elec_utils {
 
 
     /**
-     * @brief convert kernel to kernel (affine map of the density), from ele_rho to nuc_rho
+     * @brief Build the nuclear-use density from the electronic density.
+     *
+     * When `quantize == false`, this applies the affine map
+     *   ker = xi * rho - gamma * I
+     * i.e.
+     *   ker_ij = xi * rho_ij                  for i != j
+     *   ker_ii = xi * rho_ii - gamma         for i == j
+     *
+     * When `quantize == true`, the diagonal is replaced by a one-hot occupation:
+     *   ker_ii = 1 if i == occ, else 0
+     * while the off-diagonal still follows
+     *   ker_ij = xi * rho_ij                  for i != j
      */
     static int ker_from_rho(psnd_complex* ker, psnd_complex* rho, psnd_real xi, psnd_real gamma, int fdim,
                             bool quantize = false, int occ = -1) {
-        for (int i = 0, ij = 0; i < fdim; ++i) {
-            for (int j = 0; j < fdim; ++j, ++ij) {
-                ker[ij] = xi * rho[ij];
-                if (i == j) ker[ij] = (quantize) ? (i == occ ? 1.0e0 : 0.0e0) : (ker[ij] - gamma);
+        for (int i = 0; i < fdim; ++i) {
+            for (int j = 0; j < fdim; ++j) {
+                int idx = i * fdim + j;
+
+                if (i != j) {
+                    ker[idx] = xi * rho[idx];
+                    continue;
+                }
+
+                if (quantize) {
+                    ker[idx] = (i == occ) ? 1.0e0 : 0.0e0;
+                } else {
+                    ker[idx] = xi * rho[idx] - gamma;
+                }
             }
         }
         return 0;

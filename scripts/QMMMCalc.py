@@ -53,6 +53,12 @@ class QMMM:
         self.x1 = None
         self.x2 = None
 
+        self.energies_triplet = None
+        self.gradient_triplet = None
+        self.nac_triplet = None
+        self.soc = None
+        self.soc_TT = None
+
         # extract the different parts of the MM_Results
         # Fxyz_second, E_MM_real, E_MM_real_nocharge, Fxyz_modelnoc, Fxyz_modelH, E_MM_modelH = MM_Results
         
@@ -84,6 +90,14 @@ class QMMM:
             self.energies = QM_Results.energydict
             self.gradient = QM_Results.gradientdict
             self.nac = QM_Results.nacdict
+
+            if isinstance(QM_Results.tripletenergydict, dict) and len(QM_Results.tripletenergydict) > 0:
+                self.energies_triplet = QM_Results.tripletenergydict
+                self.gradient_triplet = QM_Results.tripletgradientdict
+                self.nac_triplet = QM_Results.tripletnacdict
+                self.soc = QM_Results.socdict
+                if len(self.energies_triplet) > 1:
+                    self.soc_TT = QM_Results.soc_TT_dict
 
         else:  # real QMMM calculation, build energy and gradient for each electronic state with subtractive scheme
             # here E_MM_real_nocharge contains coulumb interaction between M&L, so should be subtracted with QM's selfenergy

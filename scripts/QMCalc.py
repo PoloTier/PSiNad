@@ -43,6 +43,7 @@ from QMOutput import QMOutput     # template class for the output of a QM calcul
 from drivers.adfDriver import AdfInput, AdfOutput
 from drivers.bagelDriver import BagelInput, BagelOutput
 from drivers.bdfDriver import BdfInput, BdfOutput
+from drivers.bdfsocDriver import BdfSocInput, BdfSocOutput
 from drivers.columbusDriver import ColumbusInput, ColumbusOutput
 from drivers.DFTbabyDriver import DFTbabyInput, DFTbabyOutput
 from drivers.gamessDriver import GamessInput, GamessOutput  # objects to handle Gaussian Input and Output
@@ -81,6 +82,8 @@ class QM:
 
         self.qmsolver = ks_config.args.qmsolver
         self.qmexe = ks_config.get_nested(f'QM.{self.qmsolver.upper()}.path', '')
+        if self.qmsolver == 'bdfsoc' and self.qmexe == '':
+            self.qmexe = ks_config.get_nested('QM.BDF.path', '')
 
         # define a string attribute to store the log related to QM input and output, to be printed when convenient
         self.log = ""
@@ -185,6 +188,13 @@ class QM:
         elif ks_config.args.qmsolver == 'bdf':
             keys = ks_config.get_nested('QM.BDF.level%d'%level, '')
             self.inputData = BdfInput(keys, modelHgeom,
+                                           geometry.getAtomLabels("modelH"), optdict)
+
+        elif ks_config.args.qmsolver == 'bdfsoc':
+            keys = ks_config.get_nested('QM.BDFSOC.level%d'%level, '')
+            if keys == '':
+                keys = ks_config.get_nested('QM.BDF.level%d'%level, '')
+            self.inputData = BdfSocInput(keys, modelHgeom,
                                            geometry.getAtomLabels("modelH"), optdict)
 
         elif ks_config.args.qmsolver == 'columbus':
@@ -468,6 +478,56 @@ class QM:
 
     # =============================================================================================================
 
+    @property
+    def tripletenergydict(self):
+        """Return the dictionary with the energy results of triplets of the QM calculation """
+        return self.outputData.get("energy_triplet")
+
+    @property
+    def tripletgradientdict(self):
+        """Return the dictionary with the gradient results of triplets of the QM calculation """
+        return self.outputData.get("gradient_triplet")
+
+    @property
+    def tripletnacdict(self):
+        """Return the dictionary with the NAC results of triplets of the QM calculation """
+        return self.outputData.get("nac_triplet")
+
+    @property
+    def socdict(self):
+        return self.outputData.get("soc")
+
+    @property
+    def soc_TT_dict(self):
+        return self.outputData.get("soc_TT")
+
+    # =============================================================================================================
+
+    @staticmethod
+    def _resolveQMExec(qmsolver, qmexe=''):
+        if qmexe:
+            return qmexe
+
+        check_qm_exec = getattr(psnd_env, "checkQMExec", None)
+        if callable(check_qm_exec):
+            try:
+                return check_qm_exec('bdf' if qmsolver == 'bdfsoc' else qmsolver)
+            except TypeError:
+                pass
+
+        if qmsolver in ('bdf', 'bdfsoc'):
+            bdf_script = os.environ.get('BDF_SCRIPT')
+            if bdf_script:
+                return bdf_script
+
+        qmexe = psnd_env.which(qmsolver)
+        if qmexe is not None:
+            return qmexe
+
+        return qmsolver
+
+    # =============================================================================================================
+
     @staticmethod
     def _prepareQMDataStorage():
         """Function to initialize the QM_DATA_STORAGE directory, to be called at the
@@ -644,9 +704,7 @@ class QM:
             checkResults = qm.inputData.checkEnv()
             if not checkResults[0]: Log.fatalError(checkResults[1])
 
-            qmexe = qm.qmexe 
-            if qmexe == '':
-                qmexe = psnd_env.checkQMExec(qmsolver)
+            qmexe = QM._resolveQMExec(qmsolver, qm.qmexe)
             
             fninp = f"{qmsolver}-QM.inp"
             fnlog = f"{qmsolver}-QM.log"
@@ -731,6 +789,9 @@ class QM:
 
             elif isinstance(qm.inputData, BagelInput):
                 qm.outputData = BagelOutput(fnlog, rundir)
+
+            elif isinstance(qm.inputData, BdfSocInput):
+                qm.outputData = BdfSocOutput(fnlog, rundir)
 
             elif isinstance(qm.inputData, BdfInput):
                 qm.outputData = BdfOutput(fnlog, rundir)

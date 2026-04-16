@@ -45,6 +45,7 @@ class QMSolverType(Enum):
     ADF = 'adf'
     BAGEL = 'bagel'
     BDF = 'bdf'
+    BDFSOC = 'bdfsoc'
     COLUMBUS = 'columbus'
     GAMESS = 'gamess'
     GAUSSIAN = 'gaussian'
@@ -73,6 +74,11 @@ environments. For more information, visit: https://github.com/nubakery/bagel/'''
 '''Beijing Density Functional (BDF) program is a quantum chemistry software 
 package developed in China, which includes a variety of methods for electronic 
 structure calculations. 
+For more information, visit: https://bdf-manual.readthedocs.io/''',
+        'bdfsoc':
+'''BDF driver with SOC/triplet parsing enabled. It reuses the standard BDF
+configuration keys, while additionally extracting singlet-triplet SOC,
+triplet-triplet SOC, and triplet-state gradients/NACs for interface output.
 For more information, visit: https://bdf-manual.readthedocs.io/''',
         'columbus': 
 '''COLUMBUS is a quantum chemistry software package for highly accurate multi-reference 

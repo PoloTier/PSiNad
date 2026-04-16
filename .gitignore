@@ -14,4 +14,6 @@ _scripts
 # don't include scripts/examples in repository!!!
 examples 
 # thirdpart
-
+tests/solver_compare_universal/runs/
+tools
+AGENTS.md

@@ -326,6 +326,24 @@ if __name__ == "__main__":
 
         stat_number = 0
         inputF = int(ks_config.get_nested('QM.F', 1)) # only act on dE and NAC
+        has_triplet = isinstance(qmmm_results.energies_triplet, dict) and len(qmmm_results.energies_triplet) > 0
+        singlet_nac = qmmm_results.nac if isinstance(getattr(qmmm_results, 'nac', None), dict) else {}
+        triplet_nac = qmmm_results.nac_triplet if isinstance(getattr(qmmm_results, 'nac_triplet', None), dict) else {}
+        singlet_soc = qmmm_results.soc if isinstance(getattr(qmmm_results, 'soc', None), dict) else {}
+        triplet_soc = qmmm_results.soc_TT if isinstance(getattr(qmmm_results, 'soc_TT', None), dict) else {}
+
+        def _safe_nac(nac_dict, istate, jstate, icomp, iatom):
+            try:
+                return nac_dict[istate][jstate][icomp][iatom]
+            except (KeyError, IndexError, TypeError):
+                return 0.0
+
+        def _safe_soc(soc_dict, istate, jstate, idx):
+            try:
+                return soc_dict[istate][jstate][idx]
+            except (KeyError, IndexError, TypeError):
+                return 0.0 + 0.0j
+
         with open('interface.ds', 'w') as f:
             # write status 
             f.write('interface.stat\n')
@@ -334,38 +352,61 @@ if __name__ == "__main__":
 
             # write energy
             f.write('interface.eig\n')
-            f.write('psnd_real %d\n'%len(qmmm_results.energies))
-            for i in range(len(qmmm_results.energies)): # sorted order
-                f.write('{: 24.16e}\n'.format(qmmm_results.energies[i]))
+            if not has_triplet:
+                f.write('psnd_real %d\n'%len(qmmm_results.energies))
+                for i in range(len(qmmm_results.energies)): # sorted order
+                    f.write('{: 24.16e}\n'.format(qmmm_results.energies[i]))
+            else:
+                total_states = len(qmmm_results.energies) + 3 * len(qmmm_results.energies_triplet)
+                f.write('psnd_real %d\n'%total_states)
+                for i in range(len(qmmm_results.energies)):
+                    f.write('{: 24.16e}\n'.format(qmmm_results.energies[i]))
+                for i in range(len(qmmm_results.energies_triplet)):
+                    for _ in range(3):
+                        f.write('{: 24.16e}\n'.format(qmmm_results.energies_triplet[i]))
             f.write('\n')
 
             # write energy
             f.write('interface.dE\n')
-            # f.write('psnd_real %d\n'%(len(qmmm_results.gradient) * geometry.atomNum*3))
-            f.write('psnd_real %d\n'%(inputF * geometry.atomNum*3)) # fix F as output state number 251126
-            jHM = 0 # count for H & M atoms
-            # print(qmmm_results.gradient)
-            for i in range(geometry.atomNum): # sorted order
-                if i+1 in geometry.list_MEDIUM_HIGH:
-                    for ix in [0,1,2]:
-                        # for k in range(len(qmmm_results.gradient.keys())):
-                        for k in range(inputF): # fix F as output state number 251126
-                            f.write('{: 24.16e} '.format(qmmm_results.gradient[k][ix][jHM]))
-                        f.write('\n')
-                    jHM += 1
-                if i+1 in geometry.list_LOW:
-                    for ix in [0,1,2]:
-                        # for k in range(len(qmmm_results.gradient.keys())):
-                        for k in range(inputF): # fix F as output state number 251126
-                            f.write('{: 24.16e} '.format(0))
-                        f.write('\n')
+            if not has_triplet:
+                f.write('psnd_real %d\n'%(inputF * geometry.atomNum*3)) # fix F as output state number 251126
+                jHM = 0 # count for H & M atoms
+                for i in range(geometry.atomNum): # sorted order
+                    if i+1 in geometry.list_MEDIUM_HIGH:
+                        for ix in [0,1,2]:
+                            for k in range(inputF): # fix F as output state number 251126
+                                f.write('{: 24.16e} '.format(qmmm_results.gradient[k][ix][jHM]))
+                            f.write('\n')
+                        jHM += 1
+                    if i+1 in geometry.list_LOW:
+                        for ix in [0,1,2]:
+                            for k in range(inputF): # fix F as output state number 251126
+                                f.write('{: 24.16e} '.format(0))
+                            f.write('\n')
+            else:
+                total_states = len(qmmm_results.energies) + 3 * len(qmmm_results.energies_triplet)
+                f.write('psnd_real %d\n'%(total_states * geometry.atomNum*3))
+                jHM = 0
+                for i in range(geometry.atomNum):
+                    if i+1 in geometry.list_MEDIUM_HIGH:
+                        for ix in [0,1,2]:
+                            for k in range(len(qmmm_results.gradient)):
+                                f.write('{: 24.16e} '.format(qmmm_results.gradient[k][ix][jHM]))
+                            for k in range(len(qmmm_results.gradient_triplet)):
+                                for _ in range(3):
+                                    f.write('{: 24.16e} '.format(qmmm_results.gradient_triplet[k][ix][jHM]))
+                            f.write('\n')
+                        jHM += 1
+                    if i+1 in geometry.list_LOW:
+                        for ix in [0,1,2]:
+                            for _ in range(total_states):
+                                f.write('{: 24.16e} '.format(0))
+                            f.write('\n')
             f.write('\n')
 
             # write nac
-            # print("nac:  ", qmmm_results.nac)
-            if len(qmmm_results.nac) != 0 :
+            if not has_triplet and len(singlet_nac) != 0:
                 f.write('interface.nac\n')
-                # f.write('psnd_real %d\n'%(len(qmmm_results.nac)*len(qmmm_results.nac)*geometry.atomNum*3) )
                 f.write('psnd_real %d\n'%(inputF*inputF*geometry.atomNum*3) ) # fix F as output state number 251126
                 jHM = 0 # count for H & M atoms
                 for i in range(geometry.atomNum): # sorted order
@@ -376,7 +417,7 @@ if __name__ == "__main__":
                                     if k2 == k1:
                                         f.write('{: 24.16e} '.format(0))
                                     else:
-                                        f.write('{: 24.16e} '.format(qmmm_results.nac[k1][k2][ix][jHM]))
+                                        f.write('{: 24.16e} '.format(singlet_nac[k1][k2][ix][jHM]))
                             f.write('\n')
                         jHM += 1
                     if i+1 in geometry.list_LOW:
@@ -386,6 +427,77 @@ if __name__ == "__main__":
                                     f.write('{: 24.16e} '.format(0))
                             f.write('\n')
                 f.write('\n')
+            elif has_triplet:
+                total_states = len(qmmm_results.energies) + 3 * len(qmmm_results.energies_triplet)
+                f.write('interface.nac\n')
+                f.write('psnd_real %d\n'%(total_states * total_states * geometry.atomNum*3))
+                jHM = 0
+                for i in range(geometry.atomNum):
+                    if i+1 in geometry.list_MEDIUM_HIGH:
+                        for ix in [0,1,2]:
+                            for k1 in range(len(qmmm_results.energies)):
+                                for k2 in range(len(qmmm_results.energies)):
+                                    if k2 == k1:
+                                        f.write('{: 24.16e} '.format(0))
+                                    else:
+                                        f.write('{: 24.16e} '.format(_safe_nac(singlet_nac, k1, k2, ix, jHM)))
+                                for _ in range(3 * len(qmmm_results.energies_triplet)):
+                                    f.write('{: 24.16e} '.format(0))
+
+                            for k1 in range(len(qmmm_results.energies_triplet)):
+                                for ims in range(3):
+                                    for _ in range(len(qmmm_results.energies)):
+                                        f.write('{: 24.16e} '.format(0))
+                                    for k2 in range(len(qmmm_results.energies_triplet)):
+                                        if k2 == k1:
+                                            for _ in range(3):
+                                                f.write('{: 24.16e} '.format(0))
+                                        else:
+                                            for ims2 in range(3):
+                                                if ims2 == ims:
+                                                    f.write('{: 24.16e} '.format(_safe_nac(triplet_nac, k1, k2, ix, jHM)))
+                                                else:
+                                                    f.write('{: 24.16e} '.format(0))
+                            f.write('\n')
+                        jHM += 1
+                    if i+1 in geometry.list_LOW:
+                        for ix in [0,1,2]:
+                            for _ in range(total_states):
+                                for _ in range(total_states):
+                                    f.write('{: 24.16e} '.format(0))
+                            f.write('\n')
+                f.write('\n')
+
+                if singlet_soc:
+                    f.write('interface.soc\n')
+                    f.write('psnd_complex %d\n'%(total_states * total_states))
+                    for irow in range(total_states):
+                        if irow < len(qmmm_results.energies):
+                            for _ in range(len(qmmm_results.energies)):
+                                f.write('({:24.16e}, {:24.16e}) '.format(0, 0))
+                            for itriplet in range(len(qmmm_results.energies_triplet)):
+                                for ims in range(3):
+                                    socv = _safe_soc(singlet_soc, irow, itriplet, ims)
+                                    f.write('({:24.16e}, {:24.16e}) '.format(np.real(socv), np.imag(socv)))
+                        else:
+                            itriplet = int((irow - len(qmmm_results.energies))/3)
+                            idms = (irow - len(qmmm_results.energies))%3
+                            for isinglet in range(len(qmmm_results.energies)):
+                                socv = _safe_soc(singlet_soc, isinglet, itriplet, idms)
+                                f.write('({:24.16e}, {:24.16e}) '.format(np.real(socv), -np.imag(socv)))
+                            for i in range(3 * len(qmmm_results.energies_triplet)):
+                                jtriplet = int(i / 3)
+                                jdms = i % 3
+                                if itriplet == jtriplet:
+                                    f.write('({:24.16e}, {:24.16e}) '.format(0, 0))
+                                elif itriplet < jtriplet:
+                                    socv = _safe_soc(triplet_soc, itriplet, jtriplet, idms * 3 + jdms)
+                                    f.write('({:24.16e}, {:24.16e}) '.format(np.real(socv), np.imag(socv)))
+                                else:
+                                    socv = _safe_soc(triplet_soc, jtriplet, itriplet, jdms * 3 + idms)
+                                    f.write('({:24.16e}, {:24.16e}) '.format(np.real(socv), -np.imag(socv)))
+                        f.write('\n')
+                    f.write('\n')
 
             # write ocillation strength
             f.write('interface.strength\n')

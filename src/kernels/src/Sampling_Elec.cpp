@@ -87,14 +87,30 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
         iocc = ((use_sum) ? iocc : occ0);
         w[0] = (use_sum) ? psnd_complex(Dimension::F) : phys::math::iu;
 
+        // Sampling pipeline:
+        //   1) sample mapping amplitudes c or directly construct rho_ele
+        //   2) build rho_ele in inp_repr:
+        //        rho_ele = |c><c|  for the branches calling ker_from_c(...)
+        //      so Tr(rho_ele) = sum_i |c_i|^2, which is not always 1 for window-style sampling
+        //   3) build rho_nuc from rho_ele for nuclear-force / occupation usage:
+        //        rho_nuc = xi * rho_ele - gamma * I
+        //      unless use_cv=true, in which case the diagonal is quantized to a one-hot occupation
+        //   4) after sampling, occ_nuc is determined from rho_nuc in nuc_repr
         switch (sampling_type) {
             case ElectronicSamplingPolicy::Focus: {
+                // Focus sampling gives a pure-state rho_ele = |c><c|.
+                // rho_nuc is then the affine-mapped density used by the nuclear part.
                 elec_utils::c_focus(c.data(), xi1, gamma1, iocc, Dimension::F);
                 elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
                 elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), xi1, gamma1, Dimension::F, use_cv, iocc);
                 break;
             }
             case ElectronicSamplingPolicy::GDTWA: {
+                // In GDTWA, rho_ele is constructed directly instead of from c.
+                // Final shape:
+                //   - diagonal: occupied state = 1, others = 0
+                //   - off-diagonal: phase-sampled coherence around iocc
+                // rho_nuc here is copied from rho_ele because xi=1 and gamma=0.
                 elec_utils::c_focus(c.data(), xi1, gamma1, iocc, Dimension::F);  // @useless
 
                 /// GDTWA sampling step 1: discrete random phase
@@ -133,12 +149,17 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
                 break;
             }
             case ElectronicSamplingPolicy::SQCtri: {
+                // Window sampling generally gives a non-unit-norm c.
+                // Hence rho_ele = |c><c| is not guaranteed to have trace 1.
+                // rho_nuc is the affine-mapped density used later by the nuclear kernels.
                 elec_utils::c_window(c.data(), iocc, ElectronicSamplingPolicy::SQCtri, Dimension::F);
                 elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
                 elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), 1.0, gamma1, Dimension::F, use_cv, iocc);
                 break;
             }
             case ElectronicSamplingPolicy::SQCspx: {
+                // Same overall data flow as SQCtri:
+                //   c -> rho_ele = |c><c| -> rho_nuc = rho_ele - gamma * I (or quantized diagonal if use_cv=true)
                 elec_utils::c_sphere(c.data(), Dimension::F);
                 for (int i = 0; i < Dimension::F; ++i) c[i] = std::abs(c[i] * c[i]);
                 c[iocc] += 1.0e0;
@@ -153,17 +174,23 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
                 break;
             }
             case ElectronicSamplingPolicy::SQCtest01: {
-                // xi1 = 1 + F * gamma
-                // 
+                // xi1 = 1 + F * gamma.
+                // For window sampling, Tr(rho_ele) is generally not 1.
+                // Here we compensate that by using xi_eff = xi1 / Tr(rho_ele), so that
+                // rho_nuc = xi_eff * rho_ele - gamma * I
+                // has Tr(rho_nuc) = 1 when use_cv=false.
                 elec_utils::c_window(c.data(), iocc, ElectronicSamplingPolicy::SQCtri, Dimension::F);
                 elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
-                double norm = 0.0;
-                for (int i = 0; i < Dimension::F; ++i) norm += std::abs(rho_ele[i * Dimension::Fadd1]);
-                elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), xi1 / norm, gamma1, Dimension::F, use_cv, // rho_nuc在SQCtest01中是归一化的。
-                                         iocc);
+                double tr_rho_ele = 0.0;
+                for (int i = 0; i < Dimension::F; ++i) tr_rho_ele += std::abs(rho_ele[i * Dimension::Fadd1]);
+                double xi_eff = xi1 / tr_rho_ele;
+                elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), xi_eff, gamma1, Dimension::F, use_cv, iocc);
                 break;
             }
             case ElectronicSamplingPolicy::SQCtest02: {
+                // In this branch c is explicitly normalized first.
+                // Therefore rho_ele = |c><c| has Tr(rho_ele) = 1, and rho_nuc is then
+                // built with an effective gamma inferred from the sampled norm.
                 elec_utils::c_window(c.data(), iocc, ElectronicSamplingPolicy::SQCtri, Dimension::F);
                 double norm = 0.0e0;
                 for (int i = 0; i < Dimension::F; ++i) norm += std::abs(c[i] * c[i]);
@@ -179,6 +206,8 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
                 break;
             }
             case ElectronicSamplingPolicy::Gaussian: {
+                // If c has been initialized as a normalized wavefunction, rho_ele has trace 1.
+                // Otherwise rho_ele inherits the norm of c through rho_ele = |c><c|.
                 // elec_utils::c_gaussian(c, Dimension::F); /// @debug
                 elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
                 elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), xi1, gamma1, Dimension::F, use_cv, iocc);
@@ -186,6 +215,8 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
                 break;
             }
             case ElectronicSamplingPolicy::Constraint: {
+                // c_sphere makes ||c|| = 1, so rho_ele = |c><c| has Tr(rho_ele) = 1.
+                // rho_nuc is then the affine-mapped density with unit trace when use_cv=false.
                 elec_utils::c_sphere(c.data(), Dimension::F);
                 elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
                 elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), xi1, gamma1, Dimension::F, use_cv, iocc);

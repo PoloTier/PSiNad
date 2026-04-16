@@ -43,6 +43,18 @@ int Kernel_Representation::transform(psnd_complex* A, psnd_complex* T, int fdim,
         ARRAY_MATMUL(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL_TRANS2(A, A, T, fdim, fdim, fdim);
     }
+    // General_soc uses a complex ADT matrix (Tc); caller must pass Tc as T
+    if (from == RepresentationPolicy::General_soc && to == RepresentationPolicy::Adiabatic) {
+        ARRAY_MATMUL_TRANS1(A, T, A, fdim, fdim, lda);
+        if (Stype == SpacePolicy::L) ARRAY_MATMUL(A, A, T, fdim, fdim, fdim);
+    }
+    if (from == RepresentationPolicy::Adiabatic && to == RepresentationPolicy::General_soc) {
+        ARRAY_MATMUL(A, T, A, fdim, fdim, lda);
+        if (Stype == SpacePolicy::L) ARRAY_MATMUL_TRANS2(A, A, T, fdim, fdim, fdim);
+    }
+    // TODO: General_soc <-> Diabatic not implemented; caller should avoid this combination
+    if (from == RepresentationPolicy::General_soc && to == RepresentationPolicy::Diabatic) return 0;
+    if (from == RepresentationPolicy::Diabatic && to == RepresentationPolicy::General_soc) return 0;
     return 0;
 }
 
@@ -81,6 +93,18 @@ void Kernel_Representation::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     vedE   = DS->def(DATA::integrator::tmp::vedE);
 
     nac = DS->def(DATA::model::rep::nac);
+
+    // --- General_soc bindings ---
+    Vc             = DS->def(DATA::model::Vc);
+    dVc            = DS->def(DATA::model::dVc);
+    Ec             = DS->def(DATA::model::rep::Ec);
+    Tc             = DS->def(DATA::model::rep::Tc);
+    Toldc          = DS->def(DATA::model::rep::Toldc);
+    dEc            = DS->def(DATA::model::rep::dEc);
+    vedEc          = DS->def(DATA::integrator::tmp::vedEc);
+    TtToldc        = DS->def(DATA::integrator::tmp::TtToldc);
+    venac          = DS->def(DATA::integrator::tmp::venac);
+    commutator_d_V = DS->def(DATA::integrator::tmp::commutator_d_V);
 }
 
 Status& Kernel_Representation::initializeKernel_impl(Status& stat) { return stat; }
@@ -103,6 +127,13 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
         auto m       = this->m.subspan(iP * Dimension::N, Dimension::N);
         auto occ_nuc = this->occ_nuc.subspan(iP, 1);
         auto rho_ele = this->rho_ele.subspan(iP * Dimension::FF, Dimension::FF);
+        // --- General_soc subspans (only used in that case) ---
+        auto Vc    = this->Vc.subspan(iP * Dimension::FF, Dimension::FF);
+        auto dVc   = this->dVc.subspan(iP * Dimension::NFF, Dimension::NFF);
+        auto Ec    = this->Ec.subspan(iP * Dimension::FF, Dimension::FF);
+        auto Tc    = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+        auto Toldc = this->Toldc.subspan(iP * Dimension::FF, Dimension::FF);
+        auto dEc   = this->dEc.subspan(iP * Dimension::NFF, Dimension::NFF);
 
         switch (representation_type) {
             case RepresentationPolicy::Diabatic: {
@@ -291,6 +322,80 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                         H[ii] = -2 * Ekin * sqrt(std::max<double>(1.0 + (Epes - eig[i]) / Ekin, 0.0));
                     }
                 }
+                EigenSolve(lam.data(), R.data(), H.data(), Dimension::F);  // R*L*R^ = H
+                break;
+            }
+            case RepresentationPolicy::General_soc: {
+                // General complex (SOC) representation.
+                // Vc is Hermitian; its eigenvectors Tc are complex.
+                for (int i = 0; i < Dimension::FF; ++i) Toldc[i] = Tc[i];    // backup old Tc
+                EigenSolve(eig.data(), Tc.data(), Vc.data(), Dimension::F);  // Hermitian eigen
+
+                if (do_refer && !stat.first_step) {
+                    // TtToldc = Tc^H * Toldc (complex)
+                    ARRAY_MATMUL_TRANS1(TtToldc.data(), Tc.data(), Toldc.data(),  //
+                                        Dimension::F, Dimension::F, Dimension::F);
+                    if (!basis_switch) {
+                        for (int i = 0, ik = 0; i < Dimension::F; ++i) {
+                            for (int k = 0; k < Dimension::F; ++k, ++ik) {
+                                TtToldc[ik] = (i == k) ? psnd_complex(std::copysign(1.0, TtToldc[ik].real()), 0.0)
+                                                       : psnd_complex(0.0, 0.0);
+                            }
+                        }
+                    } else {
+                        double vset = 0.1 * std::sqrt(1.0e0 / Dimension::F);
+                        for (int i = 0; i < Dimension::F; ++i) {
+                            double maxnorm = 0;
+                            int    csr1 = 0, csr2 = 0, csr12 = 0;
+                            for (int k1 = 0, k1k2 = 0; k1 < Dimension::F; ++k1) {
+                                for (int k2 = 0; k2 < Dimension::F; ++k2, ++k1k2) {
+                                    if (std::abs(TtToldc[k1k2]) > maxnorm) {
+                                        maxnorm = std::abs(TtToldc[k1k2]);
+                                        csr1 = k1, csr2 = k2, csr12 = k1k2;
+                                    }
+                                }
+                            }
+                            double vsign = std::copysign(1.0, TtToldc[csr12].real());
+                            for (int k2 = 0, k1k2 = csr1 * Dimension::F; k2 < Dimension::F; ++k2, ++k1k2)
+                                TtToldc[k1k2] = psnd_complex(0.0, 0.0);
+                            for (int k1 = 0, k1k2 = csr2; k1 < Dimension::F; ++k1, k1k2 += Dimension::F)
+                                TtToldc[k1k2] = psnd_complex(0.0, 0.0);
+                            TtToldc[csr12] = psnd_complex(vsign * vset, 0.0);
+                        }
+                        for (int i = 0; i < Dimension::FF; ++i)
+                            TtToldc[i] = psnd_complex(std::round(TtToldc[i].real() / vset), 0.0);
+                    }
+                    ARRAY_MATMUL(Tc.data(), Tc.data(), TtToldc.data(),  //
+                                 Dimension::F, Dimension::F, Dimension::F);
+                    if (basis_switch) {
+                        std::vector<double> TtToldc_abs(Dimension::FF);
+                        for (int i = 0; i < Dimension::FF; ++i) TtToldc_abs[i] = std::abs(TtToldc[i]);
+                        ARRAY_MATMUL(eig.data(), eig.data(), TtToldc_abs.data(), 1, Dimension::F, Dimension::F);
+                    }
+                }
+
+                // dEc_j = dVc_j + [nac_j, Vc]
+                for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
+                    auto nacj = nac.subspan(jFF, Dimension::FF);
+                    auto dVcj = dVc.subspan(jFF, Dimension::FF);
+                    ARRAY_COMMUNTATOR(commutator_d_V.data(), nacj.data(), Vc.data(), Dimension::F);
+                    for (int i = 0; i < Dimension::FF; ++i) dEc[jFF + i] = dVcj[i] + commutator_d_V[i];
+                }
+
+                // Ec = diag(eig)
+                for (int i = 0, ik = 0; i < Dimension::F; ++i)
+                    for (int k = 0; k < Dimension::F; ++k, ++ik)
+                        Ec[ik] = (i == k) ? psnd_complex(eig[i], 0.0) : psnd_complex(0.0, 0.0);
+
+                // venac_{ik} = sum_j (p_j/m_j) * nac_j_{ik}   (real)
+                for (int i = 0; i < Dimension::N; ++i) ve[i] = p[i] / m[i];
+                for (int i = 0; i < Dimension::FF; ++i) {
+                    venac[i] = 0.0e0;
+                    for (int j = 0; j < Dimension::N; ++j) venac[i] += ve[j] * nac[j * Dimension::FF + i];
+                }
+
+                // H = Vc - i * venac
+                for (int i = 0; i < Dimension::FF; ++i) H[i] = Vc[i] - phys::math::im * venac[i];
                 EigenSolve(lam.data(), R.data(), H.data(), Dimension::F);  // R*L*R^ = H
                 break;
             }

@@ -11,8 +11,8 @@ DEFINE_POLICY(RepresentationPolicy,
               Adiabatic,  // adiabtic representation
               Force,      // @developing in future
               Density,    // @developing in future
-              Diabatic_NAF2  // using diabatic rep to calculate adiabatic nonadiabatic-field by bhwu & hclu 251106
-
+              Diabatic_NAF2, // using diabatic rep to calculate adiabatic nonadiabatic-field by bhwu & hclu 251106
+              General_soc  // general complex representation for SOC
 );
 
 DEFINE_POLICY(SpacePolicy,
@@ -60,6 +60,14 @@ SpacePolicy::_type Stype);
     span<psnd_int>     occ_nuc;
     span<psnd_complex> rho_ele;
     span<psnd_real>    ve, vedE, TtTold;
+
+    // --- General_soc (complex representation) additions ---
+    span<psnd_complex> Vc, dVc;
+    span<psnd_complex> Ec, Tc, Toldc, dEc;
+    span<psnd_complex> vedEc, TtToldc;
+    span<psnd_real>    venac;
+    span<psnd_complex> commutator_d_V;
+    // --- end General_soc additions ---
 
     virtual void setInputParam_impl(std::shared_ptr<Param> PM);
 

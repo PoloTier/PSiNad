@@ -109,6 +109,14 @@ Status& Kernel_Update_U::executeKernel_impl(Status& stat) {
                 ARRAY_MATMUL(U.data(), Udt.data(), U.data(), Dimension::F, Dimension::F, Dimension::F);
                 break;
             }
+            case RepresentationPolicy::General_soc: {
+                // H = R * diag(lam) * R^dag; same propagator form as Adiabatic.
+                for (int i = 0; i < Dimension::F; ++i) invexpidiagdt[i] = exp(-phys::math::im * lam[i] * scale * dt[0]);
+                ARRAY_MATMUL3_TRANS2(Udt.data(), R.data(), invexpidiagdt.data(), R.data(), Dimension::F, Dimension::F,
+                                     0, Dimension::F);
+                ARRAY_MATMUL(U.data(), Udt.data(), U.data(), Dimension::F, Dimension::F, Dimension::F);
+                break;
+            }
             default:  // representation_policy::force, representation_policy::density
                 throw psnd_error("Unsupport Representation");
                 break;

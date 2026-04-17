@@ -51,6 +51,7 @@ class Kernel_Elec_Functions final : public Kernel {
     span<psnd_int>     occ_nuc;
     span<psnd_complex> rho_ele, rho_ele_init;  ///< electronic density
     span<psnd_real>    T, T_init;
+    span<psnd_complex> Tc;  // General_soc complex ADT
 
     span<psnd_complex> w;  ///< initial measurement of the phase point
     span<psnd_complex> wz_A;

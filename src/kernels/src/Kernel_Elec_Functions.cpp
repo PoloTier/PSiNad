@@ -57,6 +57,7 @@ void Kernel_Elec_Functions::setInputParam_impl(std::shared_ptr<Param> PM) {
 void Kernel_Elec_Functions::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     rho_ele = DS->def(DATA::integrator::rho_ele);
     T       = DS->def(DATA::model::rep::T);
+    Tc      = DS->def(DATA::model::rep::Tc);
     occ_nuc = DS->def(DATA::integrator::occ_nuc);
 
     w    = DS->def(DATA::integrator::w);
@@ -207,6 +208,79 @@ Status& Kernel_Elec_Functions::executeKernel_impl(Status& stat) {
         auto T       = this->T.subspan(iP * Dimension::FF, Dimension::FF);
         auto occ_nuc = this->occ_nuc.subspan(iP, 1);
 
+        // --- General_soc short-circuit: use Tc for transforms ---
+        if (Kernel_Representation::inp_repr_type == RepresentationPolicy::General_soc) {
+            auto Tc = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+
+            // K0 in General_soc basis (no transform needed)
+            elec_utils::ker_from_rho(K0.data(), rho_ele.data(), 1.0, 0.0, Dimension::F);
+            elec_utils::ker_from_rho(K1.data(), rho_ele.data(), xi1, gamma1, Dimension::F);
+            elec_utils::ker_from_rho(K2.data(), rho_ele.data(), xi2, gamma2, Dimension::F);
+
+            // KTWD / KTWA in General_soc basis
+            elec_utils::ker_binning(KTWD.data(), rho_ele.data(), ElectronicSamplingPolicy::SQCtri);
+            trKTWD[0] = std::real(ARRAY_TRACE1(KTWD.data(), Dimension::F, Dimension::F));
+
+            // Transform to Adiabatic via Tc for adiabatic kernels
+            Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::General_soc,
+                                             RepresentationPolicy::Adiabatic,
+                                             SpacePolicy::L);
+            wz_A[0] = 1.0;
+            int max_pop = elec_utils::max_choose(rho_ele.data());
+            int act = ((use_fall) ? occ_nuc[0] : max_pop);
+            elec_utils::ker_from_rho(K1QA.data(), rho_ele.data(), 1, 0, Dimension::F, true, act);
+            ARRAY_MAT_DIAG(K1DA.data(), K1QA.data(), Dimension::F);
+            elec_utils::ker_from_rho(K2QA.data(), rho_ele.data(), 1, 0, Dimension::F);
+            for (int i = 0; i < Dimension::F; ++i)
+                K2QA[i * Dimension::Fadd1] = (std::abs(rho_ele[i * Dimension::Fadd1]) < 1.0 / xi1) ? 0.0 : 1.0;
+            ARRAY_MAT_DIAG(K2DA.data(), K2QA.data(), Dimension::F);
+            elec_utils::ker_from_rho(KSHA.data(), rho_ele.data(), 1, 0, Dimension::F, true, occ_nuc[0]);
+            elec_utils::ker_binning(KTWA.data(), rho_ele.data(), ElectronicSamplingPolicy::SQCtri);
+            trKTWA[0] = std::real(ARRAY_TRACE1(KTWA.data(), Dimension::F, Dimension::F));
+
+            // Transform K-kernels back to General_soc
+            Kernel_Representation::transform(K1QA.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            Kernel_Representation::transform(K2QA.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            Kernel_Representation::transform(K1DA.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            Kernel_Representation::transform(K2DA.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            Kernel_Representation::transform(KSHA.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+
+            // "Diabatic" kernels — treat General_soc as Diabatic basis for K1QD etc.
+            Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            wz_D[0] = 1.0;
+            max_pop = elec_utils::max_choose(rho_ele.data());
+            elec_utils::ker_from_rho(K1QD.data(), rho_ele.data(), 1, 0, Dimension::F, true, max_pop);
+            ARRAY_MAT_DIAG(K1DD.data(), K1QD.data(), Dimension::F);
+            elec_utils::ker_from_rho(K2QD.data(), rho_ele.data(), 1, 0, Dimension::F);
+            for (int i = 0; i < Dimension::F; ++i)
+                K2QD[i * Dimension::Fadd1] = (std::abs(rho_ele[i * Dimension::Fadd1]) < 1.0 / xi1) ? 0.0 : 1.0;
+            ARRAY_MAT_DIAG(K2DD.data(), K2QD.data(), Dimension::F);
+
+            ww_A[0] = 1.0; ww_D[0] = 1.0;
+            if (ww_A_init.size() > 0) ww_A[0] = std::min({std::abs(ww_A[0]), std::abs(ww_A_init[0])});
+            if (ww_D_init.size() > 0) ww_D[0] = std::min({std::abs(ww_D[0]), std::abs(ww_D_init[0])});
+            continue;
+        }
+        // --- end General_soc short-circuit ---
 
         Kernel_Representation::transform(rho_ele.data(), T.data(), Dimension::F,  //
                                          Kernel_Representation::inp_repr_type,    //

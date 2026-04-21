@@ -35,7 +35,8 @@ void Kernel_Elec_Switch::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     vpes      = DS->def(DATA::model::vpes);
     T         = DS->def(DATA::model::rep::T);
     H         = DS->def(DATA::model::rep::H);
-    occ_nuc   = DS->def(DATA::integrator::occ_nuc);
+    occ_nuc            = DS->def(DATA::integrator::occ_nuc);
+    occ_nuc_pre_switch = DS->def(DATA::integrator::occ_nuc_pre_switch);
     rho_ele   = DS->def(DATA::integrator::rho_ele);
     rho_nuc   = DS->def(DATA::integrator::rho_nuc);
     direction = DS->def(DATA::integrator::tmp::direction);
@@ -67,6 +68,13 @@ Status& Kernel_Elec_Switch::initializeKernel_impl(Status& stat) {
 }
 
 Status& Kernel_Elec_Switch::executeKernel_impl(Status& stat) {
+    // Snapshot occ_nuc before any hop logic runs. Kernel_Hop_Replan compares
+    // occ_nuc against occ_nuc_pre_switch to detect a real hop in this step.
+    // This kernel is the only writer of occ_nuc in the chain, so the snapshot
+    // lives here. P is the PIMD bead count (= 1 for nonadiabatic dynamics);
+    // using it matches the main loop below.
+    for (int iP = 0; iP < Dimension::P; ++iP) occ_nuc_pre_switch[iP] = occ_nuc[iP];
+
     for (int iP = 0; iP < Dimension::P; ++iP) {
         auto occ_nuc  = this->occ_nuc.subspan(iP, 1);
         auto rho_ele  = this->rho_ele.subspan(iP * Dimension::FF, Dimension::FF);
@@ -81,6 +89,7 @@ Status& Kernel_Elec_Switch::executeKernel_impl(Status& stat) {
         auto ForceMat = this->ForceMat.subspan(iP * Dimension::NFF, Dimension::NFF);
 
         // --- General_soc short-circuit (complex SOC path) ---
+        // See docs/dev/general_soc_representation.md for the occ/force bridging logic.
         if (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc) {
             auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
             auto EMatc     = this->EMatc.subspan(iP * Dimension::FF, Dimension::FF);
@@ -94,6 +103,27 @@ Status& Kernel_Elec_Switch::executeKernel_impl(Status& stat) {
                                              Kernel_Representation::inp_repr_type,
                                              RepresentationPolicy::General_soc,  //
                                              SpacePolicy::L);
+
+            // Force types that depend on occ_nuc (BO, NAF, NAFEXACT, etc.) require
+            // the hopping target to be chosen in the Adiabatic basis, so that
+            // occ_nuc correctly indexes adiabatic surfaces.
+            // EHR is purely mean-field (f = Tr(rho*dV)) and does not use occ_nuc.
+            bool need_adia_hop = (Kernel_NAForce::NAForce_type == NAForcePolicy::BO ||
+                                  Kernel_NAForce::NAForce_type == NAForcePolicy::NAF ||
+                                  Kernel_NAForce::NAForce_type == NAForcePolicy::NAFEXACT ||
+                                  Kernel_NAForce::NAForce_type == NAForcePolicy::NAF2 ||
+                                  Kernel_NAForce::NAForce_type == NAForcePolicy::BOSD ||
+                                  Kernel_NAForce::NAForce_type == NAForcePolicy::NAFSD);
+            if (need_adia_hop) {
+                Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,
+                                                 RepresentationPolicy::General_soc,
+                                                 RepresentationPolicy::Adiabatic,
+                                                 SpacePolicy::L);
+                Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
+                                                 RepresentationPolicy::General_soc,
+                                                 RepresentationPolicy::Adiabatic,
+                                                 SpacePolicy::L);
+            }
 
             psnd_int  from = occ_nuc[0], to = occ_nuc[0];
             psnd_real Efrom, Eto;
@@ -133,6 +163,18 @@ Status& Kernel_Elec_Switch::executeKernel_impl(Status& stat) {
                                                          Efrom, Eto, occ_nuc[0], to, reflect);
             }
             Epot[0] = vpes[0] + ((occ_nuc[0] == to) ? Eto : Efrom);
+
+            // Reverse the NAFEXACT Adiabatic transform
+            if (need_adia_hop) {
+                Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,
+                                                 RepresentationPolicy::Adiabatic,
+                                                 RepresentationPolicy::General_soc,
+                                                 SpacePolicy::L);
+                Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
+                                                 RepresentationPolicy::Adiabatic,
+                                                 RepresentationPolicy::General_soc,
+                                                 SpacePolicy::L);
+            }
 
             Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,  //
                                              RepresentationPolicy::General_soc,

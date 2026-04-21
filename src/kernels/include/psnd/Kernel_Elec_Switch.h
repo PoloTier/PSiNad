@@ -31,6 +31,7 @@ class Kernel_Elec_Switch final : public Kernel {
     int  hopping_choose_type;
 
     span<psnd_int>     occ_nuc;
+    span<psnd_int>     occ_nuc_pre_switch;
     span<psnd_real>    dt_ptr;
     span<psnd_real>    T;
     span<psnd_real>    Epot;

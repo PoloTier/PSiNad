@@ -4,6 +4,7 @@
 #include "psnd/Kernel_Elec_Functions.h"
 #include "psnd/Kernel_Elec_Switch.h"
 #include "psnd/Kernel_ExactPropagator.h"
+#include "psnd/Kernel_Hop_Replan.h"
 #include "psnd/Kernel_Load_DataSet.h"
 #include "psnd/Kernel_NAForce.h"
 #include "psnd/Kernel_Prioritization.h"
@@ -36,6 +37,7 @@ std::shared_ptr<Solver> NAD_AdaptM_Kernel(std::shared_ptr<Model> kmodel, std::st
     std::shared_ptr<Kernel_Update_p> ku_p(new Kernel_Update_p(0.5e0 / (double) split));
     std::shared_ptr<Kernel_Update_x> ku_x(new Kernel_Update_x(0.5e0));
     std::shared_ptr<Kernel_Update_U> ku_U(new Kernel_Update_U(0.5e0 / (double) split));
+    std::shared_ptr<Kernel_Hop_Replan> kreplan(new Kernel_Hop_Replan(kmodel, krepr));
 
     /// Result & Sampling & TCF
     std::shared_ptr<Kernel_Recorder> krecd(new Kernel_Recorder());
@@ -64,6 +66,10 @@ std::shared_ptr<Solver> NAD_AdaptM_Kernel(std::shared_ptr<Model> kmodel, std::st
     }
 
     kinte->appendChild(kswitch);
+    // If state detection is on and a real hop just happened, re-runs kmodel
+    // + krepr so the new occupied state's gradient is written. Otherwise
+    // a no-op. See Kernel_Hop_Replan.h for the rationale.
+    kinte->appendChild(kreplan);
     kinte->appendChild(knaf);
 
     kinte->appendChild(std::shared_ptr<Kernel_Conserve>(new Kernel_Conserve()));

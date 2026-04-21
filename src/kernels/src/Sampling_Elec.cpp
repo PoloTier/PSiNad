@@ -49,6 +49,7 @@ void Sampling_Elec::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     occ_nuc = DS->def(DATA::integrator::occ_nuc);  // which electron state is occupied
     w       = DS->def(DATA::integrator::w);
     T       = DS->def(DATA::model::rep::T);
+    Tc      = DS->def(DATA::model::rep::Tc);
 }
 
 Status& Sampling_Elec::initializeKernel_impl(Status& stat) { return stat; }
@@ -253,22 +254,38 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
             }
         }
 
-        // BO occupation in adiabatic representation
-        Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
-                                         Kernel_Representation::inp_repr_type,    //
-                                         Kernel_Representation::nuc_repr_type,    //
-                                         SpacePolicy::L);
-        occ_nuc[0] = elec_utils::max_choose(rho_nuc.data());
-        if (use_fssh) occ_nuc[0] = elec_utils::pop_choose(rho_nuc.data());
-        Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
-                                         Kernel_Representation::nuc_repr_type,    //
-                                         Kernel_Representation::inp_repr_type,    //
-                                         SpacePolicy::L);
+        // BO occupation: determine active state in adiabatic representation
+        // See docs/dev/general_soc_representation.md for the occ/force bridging logic.
+        if (Kernel_Representation::inp_repr_type == RepresentationPolicy::General_soc) {
+            auto Tc = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::General_soc,
+                                             RepresentationPolicy::Adiabatic,
+                                             SpacePolicy::L);
+            occ_nuc[0] = elec_utils::max_choose(rho_nuc.data());
+            if (use_fssh) occ_nuc[0] = elec_utils::pop_choose(rho_nuc.data());
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+        } else {
+            Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,
+                                             Kernel_Representation::inp_repr_type,
+                                             Kernel_Representation::nuc_repr_type,
+                                             SpacePolicy::L);
+            occ_nuc[0] = elec_utils::max_choose(rho_nuc.data());
+            if (use_fssh) occ_nuc[0] = elec_utils::pop_choose(rho_nuc.data());
+            Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,
+                                             Kernel_Representation::nuc_repr_type,
+                                             Kernel_Representation::inp_repr_type,
+                                             SpacePolicy::L);
+        }
     }
     _dataset->def(DATA::init::c, c);
     _dataset->def(DATA::init::rho_ele, rho_ele);
     _dataset->def(DATA::init::rho_nuc, rho_nuc);
     _dataset->def(DATA::init::T, T);
+    _dataset->def(DATA::init::Tc, Tc);
     // _dataset->def(VARIABLE<psnd_complex>("init.c", &Dimension::shape_PF, "@"), c);
     // _dataset->def(VARIABLE<psnd_complex>("init.rho_ele", &Dimension::shape_PFF, "@"), rho_ele);
     // _dataset->def(VARIABLE<psnd_complex>("init.rho_nuc", &Dimension::shape_PFF, "@"), rho_nuc);

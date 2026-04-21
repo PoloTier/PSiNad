@@ -69,6 +69,7 @@ class Sampling_Elec final : public Kernel {
 
     span<psnd_int>     occ_nuc;
     span<psnd_real>    T;
+    span<psnd_complex> Tc;
     span<psnd_complex> c, rho_ele, rho_nuc;
     span<psnd_complex> w;
 

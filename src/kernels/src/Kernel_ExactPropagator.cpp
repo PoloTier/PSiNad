@@ -103,36 +103,79 @@ Status& Kernel_ExactPropagator::executeKernel_impl(Status& stat) {
         auto vpes     = this->vpes.subspan(iP, 1);
         auto alpha    = this->alpha.subspan(iP, 1);
 
-        // --- General_soc short-circuit: compute fproj via complex ForceMatc ---
+        // --- Compute fproj: off-diagonal force projection ---
+        // See docs/dev/general_soc_representation.md for the occ/force bridging logic.
+        //
+        // NAFEXACT splits the total force into a BO diagonal part (handled by
+        // Kernel_NAForce) and an off-diagonal nonadiabatic part (fproj, handled
+        // here).  fproj drives the exact analytical momentum propagation below.
+        //
+        // The "off-diagonal" part must be extracted in the Adiabatic basis,
+        // because the BO / NAF splitting is only physically meaningful there:
+        //   fproj_j = Re sum_{i!=k} rho_A[i,k] * dE_A[k,i]_j
+        //
+        // - Adiabatic repr:   rho is already in the Adiabatic basis, so we can
+        //                     use TRACE2_OFFD directly.
+        // - General_soc repr: rho is in the diabatic-like basis.  We transform
+        //                     to Adiabatic, zero out the diagonal (-> rho_Q2),
+        //                     transform rho_Q2 back, and use the full TRACE2.
+        //                     This is equivalent to the Adiabatic off-diagonal
+        //                     trace thanks to the cyclic property of the trace.
+        //
         bool is_general_soc = (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc);
         if (is_general_soc) {
             auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
             auto ForceMatc = this->ForceMatc.subspan(iP * Dimension::NFF, Dimension::NFF);
 
-            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,  //
+            // Transform rho_nuc: General_soc → Adiabatic via Tc
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
                                              Kernel_Representation::inp_repr_type,
-                                             RepresentationPolicy::General_soc,  //
+                                             RepresentationPolicy::Adiabatic,
                                              SpacePolicy::L);
+            // Extract off-diagonal part of rho_nuc in the Adiabatic basis (zero diagonal)
+            psnd_complex rho_Q2[Dimension::FF];
+            for (int i = 0; i < Dimension::F; ++i) {
+                for (int j = 0; j < Dimension::F; ++j) {
+                    rho_Q2[i * Dimension::F + j] = rho_nuc[i * Dimension::F + j];
+                    if (i == j) rho_Q2[i * Dimension::F + j] = 0.0;
+                }
+            }
+            // Transform rho_Q2 back: Adiabatic → General_soc
+            Kernel_Representation::transform(rho_Q2, Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            // Restore rho_nuc: Adiabatic → General_soc
+            Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
+                                             RepresentationPolicy::Adiabatic,
+                                             RepresentationPolicy::General_soc,
+                                             SpacePolicy::L);
+            // fproj = Re Tr(rho_Q2 * dEc_j): full trace because rho_Q2 already
+            // contains only the Adiabatic off-diagonal contribution
             for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
                 auto dVcj = ForceMatc.subspan(jFF, Dimension::FF);
-                fproj[j] = std::real(ARRAY_TRACE2_OFFD(rho_nuc.data(), dVcj.data(), Dimension::F, Dimension::F));
+                fproj[j] = std::real(ARRAY_TRACE2(rho_Q2, dVcj.data(), Dimension::F, Dimension::F));
             }
-            // Continue below with shared exact-propagator momentum update (B_vec/e_pall/alpha_pall/...)
+        } else if (Kernel_Representation::nuc_repr_type == RepresentationPolicy::Adiabatic) {
+            // Already in Adiabatic basis: TRACE2_OFFD gives off-diagonal directly
+            Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,
+                                             Kernel_Representation::inp_repr_type,
+                                             Kernel_Representation::nuc_repr_type,
+                                             SpacePolicy::L);
+            for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
+                auto dVj = ForceMat.subspan(jFF, Dimension::FF);
+                fproj[j] = std::real(ARRAY_TRACE2_OFFD(rho_nuc.data(), dVj.data(), Dimension::F, Dimension::F));
+            }
         } else {
-            // --- end General_soc short-circuit ---
-        // std::cout << "[Kernel_ExactPropagator] Before exact propagator: rho_nuc: " <<
-        //     rho_nuc[0] << ", " << rho_nuc[1] << ", " << rho_nuc[2] << ", " << rho_nuc[3] << "\n";
-
-        Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
-                                         Kernel_Representation::inp_repr_type,    //
-                                         Kernel_Representation::nuc_repr_type,    //
-                                         SpacePolicy::L);
-
-        for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
-            auto dVj = ForceMat.subspan(jFF, Dimension::FF);
-            // f[j]     = dVj[(occ_nuc[0]) * Dimension::Fadd1];
-            fproj[j] = std::real(ARRAY_TRACE2_OFFD(rho_nuc.data(), dVj.data(), Dimension::F, Dimension::F));
-        }
+            // Diabatic or other
+            Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,
+                                             Kernel_Representation::inp_repr_type,
+                                             Kernel_Representation::nuc_repr_type,
+                                             SpacePolicy::L);
+            for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
+                auto dVj = ForceMat.subspan(jFF, Dimension::FF);
+                fproj[j] = std::real(ARRAY_TRACE2_OFFD(rho_nuc.data(), dVj.data(), Dimension::F, Dimension::F));
+            }
         }
         psnd_real B_vec[Dimension::N]; // 局部变量 B_vec
         for (int j = 0; j < Dimension::N; ++j) {

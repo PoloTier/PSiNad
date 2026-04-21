@@ -27,6 +27,7 @@ void Kernel_Update_U::setInputParam_impl(std::shared_ptr<Param> PM) {
 void Kernel_Update_U::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     eig = DS->def(DATA::model::rep::eig);
     T   = DS->def(DATA::model::rep::T);
+    Tc  = DS->def(DATA::model::rep::Tc);
     dE  = DS->def(DATA::model::rep::dE);
     lam = DS->def(DATA::model::rep::lam);
     R   = DS->def(DATA::model::rep::R);
@@ -50,6 +51,7 @@ void Kernel_Update_U::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     rho_nuc_init  = DS->def(DATA::init::rho_nuc);
     rho_dual_init = DS->def(DATA::init::rho_dual);
     T_init        = DS->def(DATA::init::T);
+    Tc_init       = DS->def(DATA::init::Tc);
     dt            = DS->def(DATA::control::dt);
 }
 
@@ -125,50 +127,106 @@ Status& Kernel_Update_U::executeKernel_impl(Status& stat) {
         /**
          * Update c, cset, rho_ele, rho_nuc etc. (always keep synchronized with propagator U)
          */
-        if (enable_update_c) {
-            for (int i = 0; i < Dimension::F; ++i) c[i] = c_init[i];
-            Kernel_Representation::transform(c.data(), T_init.data(), Dimension::F,  //
-                                             Kernel_Representation::inp_repr_type,   //
-                                             Kernel_Representation::ele_repr_type,   //
-                                             SpacePolicy::H);
-            ARRAY_MATMUL(c.data(), U.data(), c.data(), Dimension::F, Dimension::F, 1);
-            Kernel_Representation::transform(c.data(), T.data(), Dimension::F,      //
-                                             Kernel_Representation::ele_repr_type,  //
-                                             Kernel_Representation::inp_repr_type,  //
-                                             SpacePolicy::H);
+        bool is_general_soc = (Kernel_Representation::inp_repr_type == RepresentationPolicy::General_soc ||
+                               Kernel_Representation::ele_repr_type == RepresentationPolicy::General_soc);
+
+        if (is_general_soc) {
+            auto Tc      = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
+            auto Tc_init = this->Tc_init.subspan(iP * Dimension::FF, Dimension::FF);
+
+            if (enable_update_c) {
+                for (int i = 0; i < Dimension::F; ++i) c[i] = c_init[i];
+                Kernel_Representation::transform(c.data(), Tc_init.data(), Dimension::F,
+                                                 Kernel_Representation::inp_repr_type,
+                                                 Kernel_Representation::ele_repr_type,
+                                                 SpacePolicy::H);
+                ARRAY_MATMUL(c.data(), U.data(), c.data(), Dimension::F, Dimension::F, 1);
+                Kernel_Representation::transform(c.data(), Tc.data(), Dimension::F,
+                                                 Kernel_Representation::ele_repr_type,
+                                                 Kernel_Representation::inp_repr_type,
+                                                 SpacePolicy::H);
+            } else {
+                enable_update_rho_ele = true;
+            }
+            if (enable_update_rho_ele) {
+                for (int ik = 0; ik < Dimension::FF; ++ik) rho_ele[ik] = rho_ele_init[ik];
+                Kernel_Representation::transform(rho_ele.data(), Tc_init.data(), Dimension::F,
+                                                 Kernel_Representation::inp_repr_type,
+                                                 Kernel_Representation::ele_repr_type,
+                                                 SpacePolicy::L);
+                ARRAY_MATMUL3_TRANS2(rho_ele.data(), U.data(), rho_ele.data(), U.data(), Dimension::F, Dimension::F,
+                                     Dimension::F, Dimension::F);
+                Kernel_Representation::transform(rho_ele.data(), Tc.data(), Dimension::F,
+                                                 Kernel_Representation::ele_repr_type,
+                                                 Kernel_Representation::inp_repr_type,
+                                                 SpacePolicy::L);
+            } else {
+                elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
+            }
+            if (true || enable_update_rho_nuc) {
+                for (int ik = 0; ik < Dimension::FF; ++ik) rho_nuc[ik] = rho_nuc_init[ik];
+                Kernel_Representation::transform(rho_nuc.data(), Tc_init.data(), Dimension::F,
+                                                 Kernel_Representation::inp_repr_type,
+                                                 Kernel_Representation::ele_repr_type,
+                                                 SpacePolicy::L);
+                ARRAY_MATMUL3_TRANS2(rho_nuc.data(), U.data(), rho_nuc.data(), U.data(), Dimension::F, Dimension::F,
+                                     Dimension::F, Dimension::F);
+                Kernel_Representation::transform(rho_nuc.data(), Tc.data(), Dimension::F,
+                                                 Kernel_Representation::ele_repr_type,
+                                                 Kernel_Representation::inp_repr_type,
+                                                 SpacePolicy::L);
+                if (only_adjust) {
+                    for (int i = 0; i < Dimension::FF; ++i)
+                        rho_nuc[i] = rho_ele[i] + (rho_nuc_init[i] - rho_ele_init[i]);
+                }
+            }
         } else {
-            enable_update_rho_ele = true;  // if not enable update of c; update of rho_ele must be enable
-        }
-        if (enable_update_rho_ele) {
-            for (int ik = 0; ik < Dimension::FF; ++ik) rho_ele[ik] = rho_ele_init[ik];
-            Kernel_Representation::transform(rho_ele.data(), T_init.data(), Dimension::F,  //
-                                             Kernel_Representation::inp_repr_type,         //
-                                             Kernel_Representation::ele_repr_type,         //
-                                             SpacePolicy::L);
-            ARRAY_MATMUL3_TRANS2(rho_ele.data(), U.data(), rho_ele.data(), U.data(), Dimension::F, Dimension::F,
-                                 Dimension::F, Dimension::F);
-            Kernel_Representation::transform(rho_ele.data(), T.data(), Dimension::F,  //
-                                             Kernel_Representation::ele_repr_type,    //
-                                             Kernel_Representation::inp_repr_type,    //
-                                             SpacePolicy::L);
-        } else {
-            elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
-        }
-        if (true || enable_update_rho_nuc) {  // @TODO
-            for (int ik = 0; ik < Dimension::FF; ++ik) rho_nuc[ik] = rho_nuc_init[ik];
-            Kernel_Representation::transform(rho_nuc.data(), T_init.data(), Dimension::F,  //
-                                             Kernel_Representation::inp_repr_type,         //
-                                             Kernel_Representation::ele_repr_type,         //
-                                             SpacePolicy::L);
-            ARRAY_MATMUL3_TRANS2(rho_nuc.data(), U.data(), rho_nuc.data(), U.data(), Dimension::F, Dimension::F,
-                                 Dimension::F, Dimension::F);
-            Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
-                                             Kernel_Representation::ele_repr_type,    //
-                                             Kernel_Representation::inp_repr_type,    //
-                                             SpacePolicy::L);
-            // where rho_nuc = rho_ele - Gamma, where Gamma is not evolutionary (not unitory!!!)
-            if (only_adjust) {
-                for (int i = 0; i < Dimension::FF; ++i) rho_nuc[i] = rho_ele[i] + (rho_nuc_init[i] - rho_ele_init[i]);
+            if (enable_update_c) {
+                for (int i = 0; i < Dimension::F; ++i) c[i] = c_init[i];
+                Kernel_Representation::transform(c.data(), T_init.data(), Dimension::F,  //
+                                                 Kernel_Representation::inp_repr_type,   //
+                                                 Kernel_Representation::ele_repr_type,   //
+                                                 SpacePolicy::H);
+                ARRAY_MATMUL(c.data(), U.data(), c.data(), Dimension::F, Dimension::F, 1);
+                Kernel_Representation::transform(c.data(), T.data(), Dimension::F,      //
+                                                 Kernel_Representation::ele_repr_type,  //
+                                                 Kernel_Representation::inp_repr_type,  //
+                                                 SpacePolicy::H);
+            } else {
+                enable_update_rho_ele = true;  // if not enable update of c; update of rho_ele must be enable
+            }
+            if (enable_update_rho_ele) {
+                for (int ik = 0; ik < Dimension::FF; ++ik) rho_ele[ik] = rho_ele_init[ik];
+                Kernel_Representation::transform(rho_ele.data(), T_init.data(), Dimension::F,  //
+                                                 Kernel_Representation::inp_repr_type,         //
+                                                 Kernel_Representation::ele_repr_type,         //
+                                                 SpacePolicy::L);
+                ARRAY_MATMUL3_TRANS2(rho_ele.data(), U.data(), rho_ele.data(), U.data(), Dimension::F, Dimension::F,
+                                     Dimension::F, Dimension::F);
+                Kernel_Representation::transform(rho_ele.data(), T.data(), Dimension::F,  //
+                                                 Kernel_Representation::ele_repr_type,    //
+                                                 Kernel_Representation::inp_repr_type,    //
+                                                 SpacePolicy::L);
+            } else {
+                elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);
+            }
+            if (true || enable_update_rho_nuc) {  // @TODO
+                for (int ik = 0; ik < Dimension::FF; ++ik) rho_nuc[ik] = rho_nuc_init[ik];
+                Kernel_Representation::transform(rho_nuc.data(), T_init.data(), Dimension::F,  //
+                                                 Kernel_Representation::inp_repr_type,         //
+                                                 Kernel_Representation::ele_repr_type,         //
+                                                 SpacePolicy::L);
+                ARRAY_MATMUL3_TRANS2(rho_nuc.data(), U.data(), rho_nuc.data(), U.data(), Dimension::F, Dimension::F,
+                                     Dimension::F, Dimension::F);
+                Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
+                                                 Kernel_Representation::ele_repr_type,    //
+                                                 Kernel_Representation::inp_repr_type,    //
+                                                 SpacePolicy::L);
+                // where rho_nuc = rho_ele - Gamma, where Gamma is not evolutionary (not unitory!!!)
+                if (only_adjust) {
+                    for (int i = 0; i < Dimension::FF; ++i)
+                        rho_nuc[i] = rho_ele[i] + (rho_nuc_init[i] - rho_ele_init[i]);
+                }
             }
         }
     }

@@ -49,8 +49,9 @@ class Kernel_Update_U final : public Kernel {
     span<psnd_complex> U;    ///< full propagator along classical path approximation (CPA)
 
     ///< solve Diabatic propagator
-    span<psnd_real> eig, dE;    ///< Eigenvalue for diabatic V
-    span<psnd_real> T, T_init;  ///< Eigenvector for diabatic V
+    span<psnd_real> eig, dE;        ///< Eigenvalue for diabatic V
+    span<psnd_real> T, T_init;      ///< Eigenvector for diabatic V
+    span<psnd_complex> Tc, Tc_init; ///< Complex eigenvector for General_soc
 
     ///< solve Adiabatic propagator
     span<psnd_real>    lam;  ///< Eigenvalue for adiabatic effective Hamiltonian Heff = Eδ - id*P/M

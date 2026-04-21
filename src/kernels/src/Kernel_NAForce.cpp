@@ -110,6 +110,7 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
         auto alpha    = this->alpha.subspan(iP, 1);
 
         // --- General_soc short-circuit (complex SOC path) ---
+        // See docs/dev/general_soc_representation.md for the occ/force bridging logic.
         if (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc) {
             auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
             auto ForceMatc = this->ForceMatc.subspan(iP * Dimension::NFF, Dimension::NFF);

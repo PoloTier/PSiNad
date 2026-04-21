@@ -215,6 +215,11 @@ extern VARIABLE<psnd_real> T;
 };  // namespace DATA
 namespace DATA {
 namespace init {
+extern VARIABLE<psnd_complex> Tc;
+};  // namespace init
+};  // namespace DATA
+namespace DATA {
+namespace init {
 extern VARIABLE<psnd_complex> c;
 };  // namespace init
 };  // namespace DATA
@@ -675,6 +680,14 @@ extern VARIABLE<psnd_real> norm;
 namespace DATA {
 namespace integrator {
 extern VARIABLE<psnd_int> occ_nuc;
+};  // namespace integrator
+};  // namespace DATA
+namespace DATA {
+namespace integrator {
+// Snapshot of occ_nuc taken by Kernel_Elec_Switch before its hop decision.
+// Kernel_Hop_Replan compares against it to decide whether a hop occurred
+// in the current step (shape = P).
+extern VARIABLE<psnd_int> occ_nuc_pre_switch;
 };  // namespace integrator
 };  // namespace DATA
 namespace DATA {

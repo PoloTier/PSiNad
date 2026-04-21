@@ -111,6 +111,7 @@ VARIABLE<psnd_real>    NAME_WRAPPER(init::Etot, &shape_P, "init total energy");
 VARIABLE<psnd_real>    NAME_WRAPPER(init::p, &shape_PN, "init nuclear momentum");
 VARIABLE<psnd_real>    NAME_WRAPPER(init::x, &shape_PN, "init nuclear coordinate");
 VARIABLE<psnd_real>    NAME_WRAPPER(init::T, &shape_PFF, "init ADT matrix");
+VARIABLE<psnd_complex> NAME_WRAPPER(init::Tc, &shape_PFF, "init complex ADT matrix for SOC");
 VARIABLE<psnd_complex> NAME_WRAPPER(init::c, &shape_PF, "init.c");
 VARIABLE<psnd_complex> NAME_WRAPPER(init::cset, &shape_PFF, "init.cset");
 VARIABLE<psnd_complex> NAME_WRAPPER(init::rho_ele, &shape_PFF, "init.rho_ele");
@@ -200,6 +201,7 @@ VARIABLE<psnd_real>    NAME_WRAPPER(integrator::nhc::p, &shape_X, "p");
 VARIABLE<psnd_real>    NAME_WRAPPER(integrator::nhc::x, &shape_X, "x");
 VARIABLE<psnd_real>    NAME_WRAPPER(integrator::norm, &shape_P, "");
 VARIABLE<psnd_int>     NAME_WRAPPER(integrator::occ_nuc, &shape_P, "");
+VARIABLE<psnd_int>     NAME_WRAPPER(integrator::occ_nuc_pre_switch, &shape_P, "occ_nuc snapshot before kswitch");
 VARIABLE<psnd_real>    NAME_WRAPPER(integrator::ve, &shape_PN, "velocity of trajectories");
 VARIABLE<psnd_real>    NAME_WRAPPER(integrator::p, &shape_PN, "momentum of trajectories");
 VARIABLE<psnd_complex> NAME_WRAPPER(integrator::p_sign, &shape_2, "");  // check size? 2P?

@@ -85,8 +85,6 @@ class Model_QMInterface final : public Model {
     virtual void    setInputDataSet_impl(std::shared_ptr<DataSet> DS);
     virtual Status& initializeKernel_impl(Status& stat);
     virtual Status& executeKernel_impl(Status& stat);
-
-    int track_nac_sign();
 };
 
 };  // namespace PROJECT_NS

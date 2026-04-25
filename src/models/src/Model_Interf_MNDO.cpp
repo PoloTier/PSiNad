@@ -8,6 +8,7 @@
 #include "psnd/hash_fnv1a.h"
 #include "psnd/linalg.h"
 #include "psnd/macro_utils.h"
+#include "psnd/util_qm.h"
 #include "psnd/vars_list.h"
 
 #define ARRAY_SHOW(_A, _n1, _n2)                                                     \
@@ -263,7 +264,7 @@ Status& Model_Interf_MNDO::executeKernel_impl(Status& stat_in) {
 
     parse_standard(utils::concat(directory, "/", outfile), stat_in);  // parse in MNDO's units
 
-    track_nac_sign();  // @note track_nac_sign is important
+    if (refer) util_qm::track_nac_sign(nac.data(), nac_prev.data(), Dimension::F, Dimension::N);
     for (int i = 0, idx = 0; i < Dimension::N; ++i) {
         for (int j = 0; j < Dimension::F; ++j) {
             for (int k = 0; k < Dimension::F; ++k, ++idx) {
@@ -451,45 +452,6 @@ int Model_Interf_MNDO::new_task(const std::string& file, const std::string& task
  * @return int
  * @bug: attention when nac cross zero line
  */
-int Model_Interf_MNDO::track_nac_sign() {
-    if (refer) {  ///< skip starting time
-        for (int i = 0; i < Dimension::F; ++i) {
-            for (int j = 0; j < Dimension::F; ++j) {  // check if NAC(:,i,j) should flip its sign
-                if (i == j) continue;
-
-                const double norm_eps = 10e-14;
-                double       norm_old = 0.0f;
-                double       norm_new = 0.0f;
-                double       cosangle = 0.0f;
-                int          IJ       = i * Dimension::F + j;
-                for (int k = 0, idx = IJ; k < Dimension::N; ++k, idx += Dimension::FF) {
-                    norm_old += nac_prev[idx] * nac_prev[idx];
-                    norm_new += nac[idx] * nac[idx];
-                    cosangle += nac_prev[idx] * nac[idx];
-                }
-                norm_old = sqrt(norm_old);
-                norm_new = sqrt(norm_new);
-                if (norm_old < norm_eps || norm_new < norm_eps) {
-                    cosangle = 1.0f;
-                } else {
-                    cosangle = cosangle / (norm_old * norm_new);
-                }
-
-                if (norm_new > 10e12 || norm_old > 10e12) {
-                    for (int k = 0; k < Dimension::N; ++k) {
-                        nac[k * Dimension::FF + i * Dimension::F + j] =
-                            copysign(nac[k * Dimension::FF + i * Dimension::F + j],
-                                     nac_prev[k * Dimension::FF + i * Dimension::F + j]);
-                    }
-                } else if (cosangle < 0) {  // in this case we flip the sign of NAC(:,i,j)
-                    for (int k = 0; k < Dimension::N; ++k) { nac[k * Dimension::FF + i * Dimension::F + j] *= -1; }
-                }
-            }
-        }
-    }
-    for (int i = 0; i < Dimension::NFF; ++i) nac_prev[i] = nac[i];  // save a copy
-    return 0;
-}
 
 
 /**

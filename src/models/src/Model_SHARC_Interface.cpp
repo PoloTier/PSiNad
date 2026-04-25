@@ -15,6 +15,7 @@
 #include "psnd/hash_fnv1a.h"
 #include "psnd/linalg.h"
 #include "psnd/macro_utils.h"
+#include "psnd/util_qm.h"
 #include "psnd/vars_list.h"
 
 namespace PROJECT_NS {
@@ -428,8 +429,12 @@ Status& Model_SHARC_Interface::executeKernel_impl(Status& stat) {
                     }
                 }
             }
-            if (!features.count("phases") && stat.first_step && have_nacdr) {
-                for (int i = 0; i < (int)Dimension::NFF; ++i) nac_prev[i] = nac[i];
+            if (!features.count("phases") && have_nacdr) {
+                if (stat.first_step) {
+                    for (int i = 0; i < (int)Dimension::NFF; ++i) nac_prev[i] = nac[i];
+                } else {
+                    util_qm::track_nac_sign(nac.data(), nac_prev.data(), Dimension::F, Dimension::N);
+                }
             }
         } else {
             // --- real path ---
@@ -456,12 +461,17 @@ Status& Model_SHARC_Interface::executeKernel_impl(Status& stat) {
                     }
                 }
             }
-            // SHARC can track phases internally via the 'phases' feature; if the
-            // user didn't request it, fall back to the same sign-tracking logic
-            // Model_QMInterface uses so NAC continuity is preserved across steps.
-            // (track_nac_sign extraction to util/nac_phase.h is a § 3.4 TODO.)
-            if (!features.count("phases") && stat.first_step && have_nacdr) {
-                for (int i = 0; i < (int)Dimension::NFF; ++i) nac_prev[i] = nac[i];
+            // Phase continuity: when the user did not request SHARC's own
+            // 'phases' feature, fall back to the cosine-flip heuristic shared
+            // with Model_QMInterface (util_qm::track_nac_sign). On the first
+            // step there is no previous NAC frame to compare against, so we
+            // just seed nac_prev.
+            if (!features.count("phases") && have_nacdr) {
+                if (stat.first_step) {
+                    for (int i = 0; i < (int)Dimension::NFF; ++i) nac_prev[i] = nac[i];
+                } else {
+                    util_qm::track_nac_sign(nac.data(), nac_prev.data(), Dimension::F, Dimension::N);
+                }
             }
         }
 

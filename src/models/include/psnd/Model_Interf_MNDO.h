@@ -88,7 +88,6 @@ class Model_Interf_MNDO final : public Model {
     int         parse_mndo(const std::string& mndoinp);
     std::string new_keyword(const MNDOKW_map& newkeyword);
     int         new_task(const std::string& file, const std::string& task_flag);
-    int         track_nac_sign();
     Status&     parse_standard(const std::string& log, Status& stat);
     int         parse_hessian(const std::string& log);
     int         parse_hessian2(const std::string& log);

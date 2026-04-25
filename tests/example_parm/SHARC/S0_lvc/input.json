@@ -1,0 +1,32 @@
+{
+    "model": {
+        "name": "SHARC",
+        "sharc_backend": "LVC",
+        "sharc_template": "LVC.template",
+        "sharc_resources": "LVC.resources",
+        "sharc_qmin": "QM.in",
+        "N": 9,
+        "F": 13,
+        "occ": 0,
+        "dt": "0.5 fs",
+        "tend": "50.0 fs"
+    },
+    "solver": {
+        "name": "NAD",
+        "sampling_ele_flag": "Focus",
+        "sampling_nuc_flag": "Fix",
+        "M": 1,
+        "msize": 1,
+        "sstep": 1,
+        "representation_flag": "Adiabatic",
+        "inp_repr_flag": "Adiabatic",
+        "ele_repr_flag": "Adiabatic",
+        "nuc_repr_flag": "Adiabatic",
+        "naforce": "BO",
+        "time_unit": "1.0 fs"
+    },
+    "record": [
+        {"rule": "eig<mi>:R(rep.eig{M}<mi>)", "save": "S0_lvc_eig.dat"},
+        {"rule": "Etot<m>:R(Etot{I}<m>)", "save": "S0_lvc_Etot.dat"}
+    ]
+}

@@ -1,0 +1,44 @@
+2
+3
+I       xi       0       0
+Br      xbr      0       0
+# IBr 3-state model (Morse 1S0, Morse 1P1, Repulsive triplet) with diabatic
+# coupling V12. NOTE: variable names are kept lowercase so they survive SHARC's
+# template parser, which lowercases _gvar at read time but leaves Hamiltonian
+# strings in their original case (a SHARC_ANALYTICAL bug discovered during S0).
+
+Variables
+a1      0.067
+g1      0.996
+r1      4.666
+a2      0.01019
+g2      1.271
+r2      5.3479
+e2      0.01679
+a31     2.826
+g31     0.9186
+a32     3.0e7
+g32     4.3
+v12     0.0006834
+End
+
+Hamiltonian
+a1*( (1.-exp(g1*(r1-xi+xbr)))**2-1.);
+0;   a2*( (1.-exp(g2*(r2-xi+xbr)))**2-1.)+e2;
+0;   v12;   a31*exp(g31*(xbr-xi))+a32*exp(g32*(xbr-xi));
+
+
+Dipole  1
+-0.25;
+0;       0.35;
+0;       0.01;    0.07;
+
+Dipole  2
+0;
+0;       0;
+0;       0;       0;
+
+Dipole  3
+0;
+0;       0;
+0;       0;       0;

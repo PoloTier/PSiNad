@@ -1,0 +1,45 @@
+
+{
+    "model": {
+        "name": "SHARC",
+        "sharc_backend": "MNDO",
+        "sharc_template": "MNDO.template",
+        "sharc_resources": "MNDO.resources",
+        "sharc_qmin": "QM.in",
+        "N": 18,
+        "F": 4,
+        "occ": 1,
+        "dt": "0.05 fs",
+        "tend": "100.0 fs"
+    },
+    "solver": {
+        "name": "NAD-adaptM",
+        "sampling_ele_flag": "SQCtest01",
+        "sampling_nuc_flag": "Fix",
+        "M": 1,
+        "msize": 1,
+        "sstep": 20,
+        "dump": "null",
+        "gamma": 0.333333,
+        "representation_flag": "Adiabatic",
+        "inp_repr_flag": "Adiabatic",
+        "ele_repr_flag": "Adiabatic",
+        "nuc_repr_flag": "Adiabatic",
+        "naforce": "NAFEXACT",
+        "record_tmp": true,
+        "hopping_choose_type": 1,
+        "hopping_direction_type": 2,
+        "reflect": false,
+        "use_cv": false,
+        "use_fssh": false,
+        "offd_projected": true,
+        "conserve_scale": true,
+        "basis_switch": false,
+        "time_unit": "1.0 fs"
+    },
+    "record": [
+        {"rule": "TWpop<mi>:R(w, KTWD{@0}<m[occ][occ]>, KTWD<mii>)", "save": "S1_mndo_nafexact_TWpop.dat"},
+        {"rule": "eig<mi>:R(rep.eig{M}<mi>)", "save": "S1_mndo_nafexact_eig.dat"},
+        {"rule": "Etot<m>:R(Etot{I}<m>)", "save": "S1_mndo_nafexact_Etot.dat"}
+    ]
+}

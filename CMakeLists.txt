@@ -385,9 +385,30 @@ endif()
 
 # Python wrappers
 option(BUILD_PYTHONLIB "Build wrappers for Python" OFF)
-if(BUILD_PYTHONLIB)
+
+# Embed CPython to drive SHARC4 electronic-structure backends
+# (Model_SHARC_Interface). Default OFF so existing build has no Python-dev dependency.
+option(PSND_ENABLE_SHARC "Embed CPython to drive SHARC interfaces" OFF)
+
+if(BUILD_PYTHONLIB OR PSND_ENABLE_SHARC)
     add_subdirectory(thirdpart/pybind11)
+endif()
+if(BUILD_PYTHONLIB)
     add_subdirectory(wrappers/python)
+endif()
+if(PSND_ENABLE_SHARC)
+    find_package(Python3 COMPONENTS Interpreter Development NumPy REQUIRED)
+    if(PSINAD_BUILD_SHARED_LIB)
+        target_compile_definitions(${SHARED_TARGET} PRIVATE PSND_WITH_SHARC)
+        target_link_libraries(${SHARED_TARGET} PRIVATE
+            Python3::Python Python3::NumPy pybind11::embed)
+    endif()
+    if(PSINAD_BUILD_STATIC_LIB)
+        target_compile_definitions(${STATIC_TARGET} PRIVATE PSND_WITH_SHARC)
+        target_link_libraries(${STATIC_TARGET} PRIVATE
+            Python3::Python Python3::NumPy pybind11::embed)
+    endif()
+    message(STATUS "PSND_ENABLE_SHARC=ON: linking against Python3 ${Python3_VERSION}")
 endif()
 
 ########################################################################################################################

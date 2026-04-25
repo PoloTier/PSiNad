@@ -1,0 +1,26 @@
+6
+
+C  0.000000000    0.000000000   0.000000000
+N  0.000000000    0.000000000   1.350000000
+H  0.943102000    0.000000000  -0.544500000
+H  0.943102000    0.000000000   1.879500000
+H -0.943102000    0.000000000   1.879500000
+H -0.943102000    0.000000000  -0.544500000
+
+    ## Settings
+init
+unit angstrom
+states 4
+charge 1
+
+    ## Requests
+h
+dm
+grad
+nacdr
+
+# S1 MNDO — CH2NH+ cation, 4 singlets with OM2/ROHF/CI(2,1) as shipped by
+# sharc4/examples/SHARC_MNDO. Level A single-point validation (Tier 3.1 in
+# plan § 9.1): compare PSiNad-driven MNDO against sharc4/bin/driver.py on
+# same geometry. grad requested for all 4 states (shipped version only asked
+# for 1,2,4 because state 3 had zero pattern — we want full comparison).

@@ -1,0 +1,4 @@
+# Minimal resources file for SHARC_ANALYTICAL.
+# diagonalize=True keeps the SHARC side in adiabatic representation (matches
+# PSiNad Adiabatic rep for this S0 smoke test).
+diagonalize True

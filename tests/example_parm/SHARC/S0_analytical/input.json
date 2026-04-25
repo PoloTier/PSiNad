@@ -1,0 +1,31 @@
+{
+    "model": {
+        "name": "SHARC",
+        "sharc_backend": "ANALYTICAL",
+        "sharc_template": "ANALYTICAL.template",
+        "sharc_resources": "ANALYTICAL.resources",
+        "sharc_qmin": "QM.in",
+        "N": 6,
+        "F": 3,
+        "occ": 1,
+        "dt": "0.1 fs",
+        "tend": "2.0 fs"
+    },
+    "solver": {
+        "name": "NAD",
+        "sampling_ele_flag": "Focus",
+        "sampling_nuc_flag": "Fix",
+        "M": 1,
+        "msize": 1,
+        "sstep": 1,
+        "representation_flag": "Adiabatic",
+        "inp_repr_flag": "Adiabatic",
+        "ele_repr_flag": "Adiabatic",
+        "nuc_repr_flag": "Adiabatic",
+        "naforce": "BO",
+        "time_unit": "1.0 fs"
+    },
+    "record": [
+        {"rule": "eig<mi>:R(rep.eig{M}<mi>)", "save": "S0_analytical_eig.dat"}
+    ]
+}

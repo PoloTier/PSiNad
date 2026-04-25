@@ -1,0 +1,33 @@
+{
+    "model": {
+        "name": "SHARC",
+        "sharc_backend": "BAGEL",
+        "sharc_template": "BAGEL.template",
+        "sharc_resources": "BAGEL.resources",
+        "sharc_qmin": "QM.in",
+        "N": 9,
+        "F": 2,
+        "occ": 0,
+        "dt": "0.5 fs",
+        "tend": "0.5 fs"
+    },
+    "solver": {
+        "name": "NAD",
+        "sampling_ele_flag": "Focus",
+        "sampling_nuc_flag": "Fix",
+        "M": 1,
+        "msize": 1,
+        "sstep": 1,
+        "representation_flag": "Adiabatic",
+        "inp_repr_flag": "Adiabatic",
+        "ele_repr_flag": "Adiabatic",
+        "nuc_repr_flag": "Adiabatic",
+        "naforce": "BO",
+        "time_unit": "1.0 fs"
+    },
+    "record": [
+        {"rule": "eig<mi>:R(rep.eig{M}<mi>)", "save": "S1_bagel_eig.dat"},
+        {"rule": "dE<mnij>:R(rep.dE{M}<mnij>)", "save": "S1_bagel_dE.dat"},
+        {"rule": "nac<mnij>:R(rep.nac{M}<mnij>)", "save": "S1_bagel_nac.dat"}
+    ]
+}

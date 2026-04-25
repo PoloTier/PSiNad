@@ -1,0 +1,19 @@
+3
+
+S       0.00000000    0.00000000   -0.00039079
+O       0.00000000   -2.38362453    1.36159121
+O       0.00000000    2.38362453    1.36159120
+
+    ## Settings
+unit bohr
+states 4 0 3
+
+    ## Requests
+h
+grad
+nacdr
+
+# LVC SO2 test — reference geometry from sharc4/examples/SHARC_LVC/V0.txt.
+# 4 singlets + 3 triplets = 13 multiplicity-states (Dimension::F = 13).
+# Coordinates are the Franck-Condon point (normal-mode origin), so eig should
+# sit at diabatic energies with zero displacement. Dimension::N = 3 atoms * 3.

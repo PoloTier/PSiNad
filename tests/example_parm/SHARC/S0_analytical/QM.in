@@ -1,0 +1,25 @@
+2
+
+I     0.00000   0.0   0.0
+Br   -4.66600   0.0   0.0
+
+    ## Step info:
+step 0
+
+    ## Settings:
+unit bohr
+states 3
+charges 0
+
+    ## Requests:
+h
+grad
+nacdr
+dm
+
+# Geometry: I at origin, Br at -4.666 Bohr (Morse equilibrium r1 of the
+# template's first state). The Hamiltonian uses (r1 - xi + xbr) as the Morse
+# displacement, so xbr-xi = -4.666 makes the argument 0 → state 0 sits at
+# its minimum. The original sharc4 example places Br at +6.10463 Bohr which
+# gives exp(g1*10.77) ≈ 4.5e4 and unphysical 1e+8 Hartree eigenvalues — that
+# QM.in seems intended only as a structural template, not a runnable test.

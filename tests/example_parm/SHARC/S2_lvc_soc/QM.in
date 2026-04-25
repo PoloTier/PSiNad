@@ -1,0 +1,21 @@
+3
+
+S       0.00000000    0.00000000    0.09960921
+O       0.00000000   -2.38362453    1.36159121
+O       0.00000000    2.38362453    1.36159120
+
+    ## Settings
+unit bohr
+states 4 0 3
+
+    ## Requests
+h
+soc
+grad
+nacdr
+
+# S2 test — SO2 LVC+SOC: same reference geometry as S0_lvc but with the
+# 'soc' feature added. V0.txt contains a constant `SOC R` block (no
+# `lambda_soc`), so d(SOC)/dR = 0 exactly and the missing socdr term in
+# our dEc unpack does not introduce a systematic error for this example.
+# Dimension::F = 13 (4 singlets + 3 triplets × 3 Ms sublevels).

@@ -6,6 +6,7 @@
 #include "psnd/Model_NAD1D.h"
 #include "psnd/Model_QMInterface.h"
 #include "psnd/Model_QMMMInterface.h"
+#include "psnd/Model_SHARC_Interface.h"
 #include "psnd/Model_SystemBath.h"
 #include "psnd/Model_TDSystemBath.h"
 
@@ -27,6 +28,8 @@ std::shared_ptr<Model> defaultModelFactory(const std::string& name) {
         return std::shared_ptr<Model_QMInterface>(new Model_QMInterface());
     } else if (name == "QMMM") {
         return std::shared_ptr<Model_QMMMInterface>(new Model_QMMMInterface());
+    } else if (name == "SHARC") {
+        return std::shared_ptr<Model_SHARC_Interface>(new Model_SHARC_Interface());
     } else if (name == "Interf_MNDO") {
         return std::shared_ptr<Model_Interf_MNDO>(new Model_Interf_MNDO());
     } else {

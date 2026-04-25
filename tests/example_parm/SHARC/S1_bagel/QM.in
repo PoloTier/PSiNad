@@ -1,0 +1,19 @@
+3
+Comment:
+ S     0.000000     0.000000     0.100841
+ H    -0.000000     0.974799     1.182934
+ H    -0.000000    -0.974799     1.182934
+
+    ## Settings
+Init
+States 2
+Unit Angstrom
+
+    ## Requests
+H
+GRAD
+NACDR
+
+# S1 BAGEL — H2S 2-state CASSCF(6,5), cc-pvdz. Level A single-point validation.
+# Reduced from shipped `States 5 2 2` to 2 singlets to keep runtime low; once
+# baseline works, raise state count for fuller coverage.

@@ -58,6 +58,11 @@ void Kernel_NAForce::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     ftmp  = DS->def(DATA::integrator::tmp::ftmp);
     wrho  = DS->def(DATA::integrator::tmp::wrho);
 
+    // different representation is assigned with different forcemat
+    // E & dE are only used if assign nuc repr as adiabatic (which means the forcemat is stored in adiabatic representation).
+    // E & dE are updated in kernel_representation
+    // when calculate force, the density must be first transform into nuc_repr, then calculate the force
+    // the transformation function is defined in kernel_representation::transform
     switch (Kernel_Representation::nuc_repr_type) {
         case RepresentationPolicy::Diabatic:
             EMat     = DS->def(DATA::model::V);
@@ -111,6 +116,7 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
 
         // --- General_soc short-circuit (complex SOC path) ---
         // See docs/dev/general_soc_representation.md for the occ/force bridging logic.
+        // ForceMat is in spin-diabatic rep
         if (Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc) {
             auto Tc        = this->Tc.subspan(iP * Dimension::FF, Dimension::FF);
             auto ForceMatc = this->ForceMatc.subspan(iP * Dimension::NFF, Dimension::NFF);
@@ -122,13 +128,13 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
                     Kernel_Representation::transform(rho_Q1, Tc.data(), Dimension::F,  //
                                                      Kernel_Representation::inp_repr_type,
                                                      RepresentationPolicy::General_soc,  //
-                                                     SpacePolicy::L);
+                                                     SpacePolicy::L); 
                     break;
                 }
                 case NAForcePolicy::BO:
                 case NAForcePolicy::NAFEXACT:
                 default: {
-                    // Build |occ><occ| in Adiabatic, transform to General_soc
+                    // Build |occ><occ| in Adiabatic, transform to General_soc (spin-diabatic)
                     for (int i = 0; i < Dimension::FF; ++i) rho_Q1[i] = psnd_complex(0.0, 0.0);
                     rho_Q1[occ_nuc[0] * Dimension::F + occ_nuc[0]] = psnd_complex(1.0, 0.0);
                     Kernel_Representation::transform(rho_Q1, Tc.data(), Dimension::F,  //
@@ -138,6 +144,8 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
                     break;
                 }
             }
+            // after previous transform, now the rho_Q1 is on spin-diabatic representation
+
             for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
                 auto dVcj = ForceMatc.subspan(jFF, Dimension::FF);
                 f[j] = std::real(ARRAY_TRACE2(rho_Q1, dVcj.data(), Dimension::F, Dimension::F));
@@ -147,6 +155,8 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
             continue;
         }
         // --- end General_soc short-circuit ---
+
+        // nuc_repr represent which representation the ForceMat is in. 
 
         /////////////////////////////////////////////////////////////////
         // smooth dynamics force
@@ -225,6 +235,7 @@ Status& Kernel_NAForce::executeKernel_impl(Status& stat) {
                 break;
             }
             case NAForcePolicy::NAF: {
+                // NAF is define in adiabatic representation
                 Kernel_Representation::transform(rho_nuc.data(), T.data(), Dimension::F,  //
                                                  Kernel_Representation::inp_repr_type,    //
                                                  Kernel_Representation::nuc_repr_type,    //

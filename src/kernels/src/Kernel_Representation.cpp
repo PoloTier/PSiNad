@@ -14,41 +14,61 @@ const std::string Kernel_Representation::getName() { return "Kernel_Representati
 
 int Kernel_Representation::getType() const { return utils::hash(FUNCTION_NAME); }
 
+// Real ADT (orthogonal T from diagonalizing real-symmetric V):  V T = T diag(eig), T^T T = I.
+//   Stype = H (Hilbert, vector ψ, fdim x 1):
+//     dia -> adi:  ψ_adi = T^T ψ_dia
+//     adi -> dia:  ψ_dia = T   ψ_adi
+//   Stype = L (Liouville, matrix A, fdim x fdim):
+//     dia -> adi:  A_adi = T^T A_dia T
+//     adi -> dia:  A_dia = T   A_adi T^T
 int Kernel_Representation::transform(psnd_complex* A, psnd_real* T, int fdim,  //
                                      RepresentationPolicy::_type from, RepresentationPolicy::_type to,
                                      SpacePolicy::_type Stype) {
     if (from == to) return 0;
     int lda = (Stype == SpacePolicy::L) ? fdim : 1;
     if (from == RepresentationPolicy::Diabatic && to == RepresentationPolicy::Adiabatic) {
+        // A <- T^T A     ; then (L only) A <- A T   =>  A_adi = T^T A_dia T
         ARRAY_MATMUL_TRANS1(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL(A, A, T, fdim, fdim, fdim);
     }
     if (from == RepresentationPolicy::Adiabatic && to == RepresentationPolicy::Diabatic) {
+        // A <- T   A     ; then (L only) A <- A T^T =>  A_dia = T A_adi T^T
         ARRAY_MATMUL(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL_TRANS2(A, A, T, fdim, fdim, fdim);
     }
     return 0;
 }
 
+// Complex ADT. Two unitary matrices live here:
+//   - Real T  (orthogonal): diabatic <-> adiabatic, same as the overload above.
+//   - Complex Tc (unitary): general_soc <-> adiabatic; Tc diagonalizes Hermitian Vc, Tc^H Tc = I.
+// MATMUL_TRANS1/TRANS2 use Eigen .adjoint(), so for complex T they are Hermitian conjugates (T^H),
+// for real T they reduce to plain transpose (T^T).
+//   Stype = H:  ψ_adi = Tc^H ψ_soc ;  ψ_soc = Tc   ψ_adi
+//   Stype = L:  A_adi = Tc^H A_soc Tc ;  A_soc = Tc A_adi Tc^H
 int Kernel_Representation::transform(psnd_complex* A, psnd_complex* T, int fdim,  //
                                      RepresentationPolicy::_type from, RepresentationPolicy::_type to,
                                      SpacePolicy::_type Stype) {
     if (from == to) return 0;
     int lda = (Stype == SpacePolicy::L) ? fdim : 1;
     if (from == RepresentationPolicy::Diabatic && to == RepresentationPolicy::Adiabatic) {
+        // A_adi = T^H A_dia T  (T real here, so T^H = T^T)
         ARRAY_MATMUL_TRANS1(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL(A, A, T, fdim, fdim, fdim);
     }
     if (from == RepresentationPolicy::Adiabatic && to == RepresentationPolicy::Diabatic) {
+        // A_dia = T A_adi T^H
         ARRAY_MATMUL(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL_TRANS2(A, A, T, fdim, fdim, fdim);
     }
-    // General_soc uses a complex ADT matrix (Tc); caller must pass Tc as T
+    // General_soc uses a complex ADT matrix (Tc); caller must pass Tc as T.
     if (from == RepresentationPolicy::General_soc && to == RepresentationPolicy::Adiabatic) {
+        // A_adi = Tc^H A_soc Tc
         ARRAY_MATMUL_TRANS1(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL(A, A, T, fdim, fdim, fdim);
     }
     if (from == RepresentationPolicy::Adiabatic && to == RepresentationPolicy::General_soc) {
+        // A_soc = Tc A_adi Tc^H
         ARRAY_MATMUL(A, T, A, fdim, fdim, lda);
         if (Stype == SpacePolicy::L) ARRAY_MATMUL_TRANS2(A, A, T, fdim, fdim, fdim);
     }
@@ -135,8 +155,21 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
         auto Toldc = this->Toldc.subspan(iP * Dimension::FF, Dimension::FF);
         auto dEc   = this->dEc.subspan(iP * Dimension::NFF, Dimension::NFF);
 
+        // -----------------------------------------------------------------
+        // Per-step representation update. For each bead iP we (a) refresh the
+        // ADT (T or Tc) by diagonalising the model potential, (b) build the
+        // diagonal energy matrix E, and (c) assemble the effective propagator
+        // Hamiltonian H so Kernel_Update_U can do U = exp(-i H dt) via the
+        // factorisation R diag(lam) R^H = H produced at the end of each case.
+        // -----------------------------------------------------------------
         switch (representation_type) {
             case RepresentationPolicy::Diabatic: {
+                // Diabatic propagation: dynamics live in the diabatic basis,
+                // so the propagator is just H = V. T and eig are still solved
+                // (V T = T diag(eig)) so observables can be rotated to
+                // adiabatic on demand, but no temporal sign/permutation fix
+                // is applied — T may flip arbitrarily between steps.
+                // Outputs: T, eig, E = diag(eig), H = V.
                 EigenSolve(eig.data(), T.data(), V.data(), Dimension::F);
                 for (int i = 0, ik = 0; i < Dimension::F; ++i)
                     for (int k = 0; k < Dimension::F; ++k, ++ik) E[ik] = (i == k) ? eig[i] : 0.0e0;
@@ -144,7 +177,14 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                 break;
             }
             case RepresentationPolicy::Diabatic_NAF2: {
-                // using diabatic rep to calculate adiabatic nonadiabatic-field
+                // Diabatic propagation but the non-adiabatic force is taken
+                // in the (smoothed) adiabatic basis, so T must stay continuous
+                // across steps. Same V-eigen step as Diabatic, plus:
+                //   TtTold = T^T Told  ->  rounded to a signed permutation
+                //   T <- T * TtTold    (and eig reordered if basis_switch)
+                // basis_switch=false  : per-column sign match only.
+                // basis_switch=true   : full crossing/permutation reordering.
+                // Outputs: T, Told, eig, E = diag(eig), H = V.
                 for (int i = 0; i < Dimension::FF; ++i) Told[i] = T[i];    // backup old T matrix
                 EigenSolve(eig.data(), T.data(), V.data(), Dimension::F);  // solve new eigen problem
                 for (int i = 0, ik = 0; i < Dimension::F; ++i)
@@ -199,6 +239,29 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                 break;
             }
             case RepresentationPolicy::Adiabatic: {
+                // Adiabatic propagation. Two routes for (T, eig, dE, nac):
+                //   !onthefly : diagonalise model V here, build dE = T^T dV T
+                //               (BATH_FORCE_BILINEAR exploits bath structure).
+                //               Continuity of T is enforced via the same
+                //               TtTold = T^T Told sign/permutation fix
+                //   onthefly  : eig, dE, nac come straight from the QM model;
+                //               T is left as the identity (every QM model
+                //               sets T = I once in setInputDataSet_impl and
+                //               never touches it again), because on-the-fly
+                //               backends already work in their own quasi-
+                //               adiabatic basis. Adiabatic-state continuity
+                //               is then carried by the model's NAC sign
+                //               tracking (e.g. nac_prev), not by T.
+                //
+                // Effective Hamiltonian for U = exp(-i H dt):
+                //   E = diag(eig - Emean)              (Emean shift = trace gauge)
+                //   off-diag, !onthefly :  H_ij = -i (p/m)·dE_ij / (eig_j - eig_i)
+                //                          (uses nacv_ij = dE_ij/(E_j - E_i))
+                //   off-diag,  onthefly :  H_ij = -i sum_k (p_k/m_k) nac_k_ij
+                //   phase_correction (opt.): replace diagonal by
+                //                          -2 Ekin sqrt(1 + (Epes - eig_i)/Ekin)
+                // H is then diagonalised: R diag(lam) R^H = H.
+                // Outputs: T, eig, E, dE (when !onthefly), H, lam, R.
                 if (!onthefly) {
                     for (int i = 0; i < Dimension::FF; ++i) Told[i] = T[i];    // backup old T matrix
                     EigenSolve(eig.data(), T.data(), V.data(), Dimension::F);  // solve new eigen problem
@@ -265,6 +328,34 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                             }
                         }
                     } else {
+                        // Adiabatic gradient: for every nuclear DOF k,
+                        //     dE_k = T^T · dV_k · T            (k = 0 .. N-1)
+                        // Storage of dV / dE is the row-major 3-D layout
+                        // (N, F, F), flat index = k*FF + i*F + j.
+                        //
+                        // Instead of N small triple products, we batch all k
+                        // into two BLAS calls by reshaping the buffer; the i
+                        // axis is the one that has to slide between "row" and
+                        // "column" position, hence the two transposes.
+                        //
+                        //   step 1  view (NF, F):  rows = k*F + i, cols = j
+                        //           dE = dV · T          -> dV_k · T  for every k
+                        //   step 2  TRANSPOSE (N, FF) -> (FF, N)
+                        //           moves the k axis to the right, exposing i
+                        //           as the leading row of an (F, NF) view
+                        //   step 3  view (F, NF):  rows = i, cols = j'*N + k
+                        //           dE = T^T · dE       -> (T^T dV_k T) for every k
+                        //   step 4  TRANSPOSE (FF, N) -> (N, FF)
+                        //           restores the canonical (N, F, F) layout
+                        //           expected by Kernel_NAForce / Update_p.
+                        //
+                        // Why batched and not a per-k loop with MATMUL3_TRANS1:
+                        // for the typical PSiNad regime (F ≈ 4-15) the two
+                        // big matmuls amortise Eigen's per-call overhead and
+                        // the 2*N*F^2 transpose traffic still fits in L2; per
+                        // /tmp/bench_dE.cpp the crossover is around F ≈ 15 -
+                        // beyond that, switch to the per-k MATMUL3_TRANS1
+                        // form (cf. the BATH_FORCE_BILINEAR branch above).
                         ARRAY_MATMUL(dE.data(), dV.data(), T.data(), Dimension::NF, Dimension::F, Dimension::F);
                         ARRAY_TRANSPOSE(dE.data(), Dimension::N, Dimension::FF);
                         ARRAY_MATMUL_TRANS1(dE.data(), T.data(), dE.data(), Dimension::F, Dimension::F, Dimension::NF);
@@ -326,10 +417,24 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
                 break;
             }
             case RepresentationPolicy::General_soc: {
-                // General complex (SOC) representation.
-                // Vc is Hermitian; its eigenvectors Tc are complex.
+                // General complex (SOC) representation: Vc is Hermitian, its
+                // eigenvectors Tc are complex unitary. Vc = Tc diag(eig) Tc^H.
+                //   1. Toldc <- Tc ; Hermitian eigen on Vc -> (eig, Tc).
+                //      Continuity fix uses the *complex* TtToldc = Tc^H Toldc
+                //      (real part rounded to a signed permutation).
+                //   2. dEc_j = dVc_j + [nac_j, Vc].   For a unitary ADT,
+                //      d(Tc^H Vc Tc) = Tc^H (dVc + [nac, Vc]) Tc, so the
+                //      bracketed quantity is the soc-basis gradient stored
+                //      for the force routines.
+                //   3. Ec = diag(eig).
+                // Effective propagator is built directly in the soc basis
+                // (not the adiabatic basis):
+                //   venac_ik = sum_j (p_j/m_j) · nac_j_ik         (real)
+                //   H        = Vc - i · venac
+                //   R diag(lam) R^H = H
+                // Outputs: Tc, Toldc, eig, Ec, dEc, venac, H, lam, R.
                 for (int i = 0; i < Dimension::FF; ++i) Toldc[i] = Tc[i];    // backup old Tc
-                EigenSolve(eig.data(), Tc.data(), Vc.data(), Dimension::F);  // Hermitian eigen
+                EigenSolve(eig.data(), Tc.data(), Vc.data(), Dimension::F);  // Hermitian eigen，Vc = Tc diag(eig) Tc^dag
 
                 if (do_refer && !stat.first_step) {
                     // TtToldc = Tc^H * Toldc (complex)
@@ -402,6 +507,8 @@ Status& Kernel_Representation::executeKernel_impl(Status& stat) {
             case RepresentationPolicy::Force:
             case RepresentationPolicy::Density:
             default:
+                // Pure-force / density-only schemes do not need a basis
+                // transform here; the relevant kernels handle their own state.
                 break;
         }
     }

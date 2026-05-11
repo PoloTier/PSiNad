@@ -55,15 +55,25 @@ class Kernel_Recorder final : public Kernel {
     int  occ0;
     int  record_dumpstep;
     bool record_tmp;
+    bool record_xyz;
 
     span<psnd_int>           istep_ptr;
     span<psnd_int>           sstep_ptr;
     span<psnd_int>           isamp_ptr;
     span<psnd_int>           nsamp_ptr;
+
+    span<psnd_int>           atoms_ptr;
+    span<psnd_real>          x_ptr;
+    int                      natom = 0;
+    // See Kernel_Recorder.cpp::initializeKernel_impl for the continue/restart
+    // crash-recovery invariant that motivates this flag.
+    bool                     skip_first_xyz_append = false;
+
     double                   t0, dt, time_unit;
     std::vector<std::string> opened_files;
 
     void parse();
+    void writeXYZFrame(std::ofstream& ofs, const psnd_real* x_data, const std::string& comment);
 
     virtual void setInputParam_impl(std::shared_ptr<Param> PM);
 

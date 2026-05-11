@@ -2,6 +2,7 @@
 
 #include <unistd.h>
 
+#include <complex>
 #include <cstdlib>
 #include <sstream>
 
@@ -89,6 +90,9 @@ void Model_QMInterface::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     osc_strength = DS->def_real("model.osc_strength", Dimension::F, "Oscillator strengths for transitions");
     V                = DS->def(DATA::model::V);
     dV               = DS->def(DATA::model::dV);
+    Vc               = DS->def(DATA::model::Vc);
+    dVc              = DS->def(DATA::model::dVc);
+    V_prev           = DS->def(DATA::model::V_prev);
     eig              = DS->def(DATA::model::rep::eig);
     T                = DS->def(DATA::model::rep::T);
     dE               = DS->def(DATA::model::rep::dE);
@@ -102,7 +106,7 @@ void Model_QMInterface::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     t_ptr            = DS->def(DATA::control::t);
     istep_ptr        = DS->def(DATA::control::istep);
 
-    ARRAY_EYE(T.data(), Dimension::F);
+    ARRAY_EYE(T.data(), Dimension::F); // 初始化为单位矩阵
 
     
     double        dtmp;
@@ -308,6 +312,18 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
         std::ifstream ifs;
         int           stat_number = 1;
         std::string   eachline;
+        bool          has_soc = false;
+        const bool    is_general_soc =
+            (Kernel_Representation::representation_type == RepresentationPolicy::General_soc ||
+             Kernel_Representation::inp_repr_type == RepresentationPolicy::General_soc ||
+             Kernel_Representation::ele_repr_type == RepresentationPolicy::General_soc ||
+             Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc ||
+             Kernel_Representation::tcf_repr_type == RepresentationPolicy::General_soc);
+
+        if (is_general_soc) {
+            for (int i = 0; i < Dimension::FF; ++i) Vc[i] = psnd_complex(0.0, 0.0);
+            for (int i = 0; i < Dimension::NFF; ++i) dVc[i] = psnd_complex(0.0, 0.0);
+        }
 
         // all quantities are needed in AU
         ifs.open(utils::concat(path_str, "/interface.ds"));
@@ -323,16 +339,39 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
             if (eachline.find("interface.dE") != eachline.npos) {
                 getline(ifs, eachline);
                 for (int j = 0, jFF = 0; j < Dimension::N; ++j, jFF += Dimension::FF) {
-                    for (int i = 0, jii = jFF; i < Dimension::F; ++i, jii += Dimension::Fadd1) ifs >> dE[jii];
+                    for (int i = 0, jii = jFF; i < Dimension::F; ++i, jii += Dimension::Fadd1) {
+                        ifs >> dE[jii];
+                        if (is_general_soc) dVc[jii] = psnd_complex(dE[jii], 0.0);
+                    }
                 }
             }
             if (eachline.find("interface.nac") != eachline.npos) {
                 getline(ifs, eachline);
                 for (int jik = 0; jik < Dimension::NFF; ++jik) ifs >> nac[jik];
             } 
+            if (eachline.find("interface.soc") != eachline.npos) {
+                getline(ifs, eachline);
+                has_soc = true;
+                char      ch;
+                psnd_real real, imag;
+                for (int ik = 0; ik < Dimension::FF; ++ik) {
+                    ifs >> ch >> real >> ch >> imag >> ch;
+                    Vc[ik] = psnd_complex(real, imag);
+                }
+            }
             if (eachline.find("interface.strength") != eachline.npos) {
                 getline(ifs, eachline);
                 for (int i = 0; i < Dimension::F; ++i) ifs >> osc_strength[i];
+            }
+        }
+        if (is_general_soc && stat_number == 0) {
+            if (!has_soc) {
+                std::cout << "[QMInterface] interface.soc is required when using General_soc.\n";
+                stat_number = 1;
+            } else {
+                for (int i = 0, ii = 0; i < Dimension::F; ++i, ii += Dimension::Fadd1) {
+                    Vc[ii] += psnd_complex(eig[i], 0.0);
+                }
             }
         }
         std::string command;
@@ -382,6 +421,10 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
             // in the first step, just copy nac to nac_prev
             for (int i = 0; i < Dimension::NFF; ++i) nac_prev[i] = nac[i];
         }
+        track_general_soc_sign(stat.first_step);
+        // Legacy real adiabatic dE reconstruction. Do not copy this NAC*gap term into
+        // dVc for General_soc: dVc is only the coordinate derivative of Vc. The NAC
+        // contribution is added once in Kernel_Representation as dEc = dVc + [nac,Vc] in kernel_representation.
         for (int i = 0, idx = 0; i < Dimension::N; ++i) {
             for (int j = 0; j < Dimension::F; ++j) {
                 for (int k = 0; k < Dimension::F; ++k, ++idx) {
@@ -393,6 +436,35 @@ Status& Model_QMInterface::executeKernel_impl(Status& stat) {
     }
     for (int i = 0; i < Dimension::N; ++i) x[i] /= phys::au_2_ang;
     return stat;
+}
+
+void Model_QMInterface::track_general_soc_sign(bool first_step) {
+    const bool is_general_soc =
+        (Kernel_Representation::representation_type == RepresentationPolicy::General_soc ||
+         Kernel_Representation::inp_repr_type == RepresentationPolicy::General_soc ||
+         Kernel_Representation::ele_repr_type == RepresentationPolicy::General_soc ||
+         Kernel_Representation::nuc_repr_type == RepresentationPolicy::General_soc);
+    if (!is_general_soc) return;
+
+    if (!first_step) {
+        const double ths_soc = 1.0e-10;
+        for (int i = 0; i < Dimension::F; ++i) {
+            for (int j = 0; j < Dimension::F; ++j) {
+                if (i == j) continue;
+
+                int ij = i * Dimension::F + j;
+                if (std::abs(Vc[ij]) <= ths_soc) continue;
+
+                double overlap = std::real(std::conj(Vc[ij]) * V_prev[ij]);
+                if (overlap < 0.0) {
+                    Vc[ij] *= -1.0;
+                    for (int k = 0; k < Dimension::N; ++k) dVc[k * Dimension::FF + ij] *= -1.0;
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < Dimension::FF; ++i) V_prev[i] = Vc[i];
 }
 
 };  // namespace PROJECT_NS

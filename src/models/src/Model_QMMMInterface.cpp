@@ -102,7 +102,12 @@ void Model_QMMMInterface::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     t_ptr            = DS->def(DATA::control::t);
     istep_ptr        = DS->def(DATA::control::istep);
 
-    ARRAY_EYE(T.data(), Dimension::F);  // 为什么要在这儿初始化T矩阵？
+    // T is the diabatic->adiabatic rotation expected by Kernel_Representation.
+    // On-the-fly backends already deliver eig/dE/nac in their own quasi-
+    // adiabatic basis, so T has no rotation to carry; we set it to identity
+    // here once and never touch it again. Adiabatic-state continuity across
+    // steps is tracked through nac sign-following, not through T.
+    ARRAY_EYE(T.data(), Dimension::F);
     // ARRAY_EYE(Tmod.data(), Dimension::N);
 
     if (!isFileExists(qmmm_layer_info)) { throw psnd_error("qmm_layer_info is needed!"); }

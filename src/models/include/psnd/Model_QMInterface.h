@@ -58,6 +58,7 @@ class Model_QMInterface final : public Model {
     span<psnd_real> mass;
     span<psnd_real> vpes, grad, hess, Tmod;
     span<psnd_real> V, dV;
+    span<psnd_complex> Vc, dVc, V_prev;
     span<psnd_real> T, eig, dE;
     span<psnd_real> nac, nac_prev;
     span<psnd_real> f_r, f_p, f_rp;
@@ -85,6 +86,8 @@ class Model_QMInterface final : public Model {
     virtual void    setInputDataSet_impl(std::shared_ptr<DataSet> DS);
     virtual Status& initializeKernel_impl(Status& stat);
     virtual Status& executeKernel_impl(Status& stat);
+
+    void track_general_soc_sign(bool first_step);
 };
 
 };  // namespace PROJECT_NS

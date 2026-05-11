@@ -1,14 +1,17 @@
 #include "psnd/Kernel_Recorder.h"
 
 #include <algorithm>
+#include <fstream>
 
 #include "psnd/Einsum.h"
 #include "psnd/RuleEvaluator.h"
 #include "psnd/RuleSet.h"
+#include "psnd/chem.h"
 #include "psnd/debug_utils.h"
 #include "psnd/hash_fnv1a.h"
 #include "psnd/linalg.h"
 #include "psnd/macro_utils.h"
+#include "psnd/phys.h"
 #include "psnd/vars_list.h"
 
 namespace PROJECT_NS {
@@ -30,6 +33,7 @@ void Kernel_Recorder::setInputParam_impl(std::shared_ptr<Param> PM) {
     occ0            = _param->get_int({"model.occ", "solver.occ"}, LOC(), -1);
     record_dumpstep = _param->get_int({"solver.record_dumpstep"}, LOC(), 0);
     record_tmp      = _param->get_bool({"solver.record_tmp"}, LOC(), false);
+    record_xyz      = _param->get_bool({"solver.record_xyz"}, LOC(), false);
 }
 
 void Kernel_Recorder::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
@@ -39,6 +43,23 @@ void Kernel_Recorder::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
     nsamp_ptr = DS->def(DATA::control::nsamp);
     // set time unit in recorder
     DS->def(DATA::control::pertimeunit)[0] = 1.0e0 / time_unit;
+
+    if (record_xyz) {
+        atoms_ptr = DS->def(DATA::model::atoms);
+        x_ptr     = DS->def(DATA::integrator::x);
+        natom     = static_cast<int>(Dimension::N / 3);
+    }
+}
+
+void Kernel_Recorder::writeXYZFrame(std::ofstream& ofs, const psnd_real* x_data, const std::string& comment) {
+    ofs << natom << "\n";
+    ofs << comment << "\n";
+    for (int i = 0, idx = 0; i < natom; ++i) {
+        ofs << FMT(8) << chem::getElemLabel(atoms_ptr[i])  //
+            << FMT(8) << x_data[idx++] * phys::au_2_ang    //
+            << FMT(8) << x_data[idx++] * phys::au_2_ang    //
+            << FMT(8) << x_data[idx++] * phys::au_2_ang << "\n";
+    }
 }
 
 void Kernel_Recorder::parse() {
@@ -110,6 +131,55 @@ void Kernel_Recorder::parse() {
 Status& Kernel_Recorder::initializeKernel_impl(Status& stat) {
     bool not_parsed = _ruleset->getRules().size() == 0;
     if (not_parsed) parse();
+
+    if (record_xyz) {
+        for (int i = 0; i < natom; ++i) {
+            if (atoms_ptr[i] <= 0) {
+                throw psnd_error(utils::concat(
+                    "record_xyz=true requires a model with real atomic identities, ",
+                    "but atoms[", i, "]=", atoms_ptr[i], " is not a valid Z."));
+            }
+        }
+        // Continue/restart semantics for traj.xyz.
+        //
+        // Iteration order in NAD / NAD-adaptM is `Recorder -> Integrator -> SHARC`
+        // (see NAD_AdaptM_Kernel.cpp), so when a Recorder dump fires inside
+        // iteration K, traj.xyz already contains an `isamp=K` frame BEFORE
+        // SHARC has been called for step K. SHARC's STEP file is updated
+        // atomically in Model_SHARC_Interface (write_step_file runs only after
+        // sharc.run() succeeds and the wrapper does not catch exceptions), so
+        // on disk after a crash:
+        //   * SAVE/STEP == K-1 if SHARC step K crashed (or never started)
+        //   * SAVE/STEP == K   if SHARC step K succeeded and a later kernel crashed
+        // In either case the latest record-dump on disk has control.istep == K.
+        //
+        // On continue, PSiNad sends "step K" to SHARC. SHARC's _step_logic
+        // accepts both `K == last+1` (newstep -> fresh QM with last step's
+        // orbitals as initial guess) and `K == last` (samestep -> redo step K),
+        // so neither crash mode produces a step-number conflict. (A mismatch
+        // only happens if you pick an old dump from a fully completed run
+        // where SAVE has been advanced far past dump.istep — not a real-crash
+        // workflow.)
+        //
+        // Because frame K is already in traj.xyz from the pre-crash Recorder
+        // call, the resumed iteration K must skip its FIRST Recorder append to
+        // avoid a duplicate seam frame. That is the sole purpose of
+        // `skip_first_xyz_append`.
+        //
+        // Cross-directory continue is supported but the user must `cp
+        // seed_dir/traj.xyz new_dir/` themselves before running — we do not
+        // replay history from bin.ds, because doing so would duplicate the
+        // user's own `integrator.x` recording rule (if any) inside the dump.
+        const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+        const bool        is_load  = load_str.find(":restart") != std::string::npos  //
+                                  || load_str.find(":continue") != std::string::npos;
+        if (is_load) {
+            skip_first_xyz_append = true;
+        } else {
+            std::ofstream ofs(utils::concat(this->directory, "/traj.xyz"), std::ios::trunc);
+            ofs.close();
+        }
+    }
     return stat;
 }
 
@@ -118,6 +188,16 @@ Status& Kernel_Recorder::executeKernel_impl(Status& stat) {
         for (auto& irule : _ruleset->getRules()) { irule->calculateResult(isamp_ptr[0], false); }
     } else {
         for (auto& irule : _ruleset->getRules()) { irule->calculateResult(isamp_ptr[0], true); }
+    }
+    if (record_xyz) {
+        if (skip_first_xyz_append) {
+            skip_first_xyz_append = false;
+        } else {
+            std::ofstream ofs(utils::concat(this->directory, "/traj.xyz"), std::ios::app);
+            writeXYZFrame(ofs, x_ptr.data(),
+                          utils::concat("isamp=", isamp_ptr[0], " istep=", istep_ptr[0]));
+            ofs.close();
+        }
     }
     if (record_tmp) RuleSet::flush_all(this->directory, ".TMP", 0);
     if (record_dumpstep > 0) {

@@ -60,6 +60,7 @@ void Kernel_Elec_Switch::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
 }
 
 Status& Kernel_Elec_Switch::initializeKernel_impl(Status& stat) {
+    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":resume") != std::string::npos) return stat;
     double dt_bak = dt_ptr[0];
     dt_ptr[0]     = 0.0e0;  // @make no dynamics here
     executeKernel_impl(stat);

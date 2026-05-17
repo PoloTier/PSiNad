@@ -120,8 +120,10 @@ void Kernel_Elec_Functions::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
 }
 
 Status& Kernel_Elec_Functions::initializeKernel_impl(Status& stat) {
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":continue") != std::string::npos) return stat;
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":restart") != std::string::npos) {  //
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    if (load_str.find(":continue") != std::string::npos) return stat;
+    if (load_str.find(":resume") != std::string::npos) return stat;
+    if (load_str.find(":restart") != std::string::npos) {  //
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         _dataset->def(VARIABLE<psnd_real>("integrator.1", &Dimension::shape_1, "@"))[0] = 1;
         _dataset->def(VARIABLE<psnd_real>("init.1", &Dimension::shape_1, "@"))[0]       = 1;

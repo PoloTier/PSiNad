@@ -52,8 +52,10 @@ Status& Sampling_Nucl::executeKernel_impl(Status& stat) {
     // if restart, we should get all initial values and current values!
     // not that: all values defined by Kernel_Elec_Functions will also be recoveed later.
     // not that: all values defined by Kernel_Recorder will also be recovered later.
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":continue") != std::string::npos) return stat;
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":restart") != std::string::npos) {
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    if (load_str.find(":continue") != std::string::npos) return stat;
+    if (load_str.find(":resume") != std::string::npos) return stat;
+    if (load_str.find(":restart") != std::string::npos) {
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         _dataset->def(DATA::init::x, _dataset_load);
         _dataset->def(DATA::init::p, _dataset_load);

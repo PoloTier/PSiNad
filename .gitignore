@@ -15,5 +15,7 @@ _scripts
 examples 
 # thirdpart
 tests/solver_compare_universal/runs/
+tests/resume_mode/*/runs/
+tests/resume_mode/sharc_molcas_h2s/MOLCAS.resources
 tools
 AGENTS.md

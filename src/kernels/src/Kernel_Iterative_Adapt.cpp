@@ -18,6 +18,76 @@
 
 namespace PROJECT_NS {
 
+namespace {
+
+bool is_resume_mode(const std::string& load) { return load.find(":resume") != std::string::npos; }
+
+psnd_int get_loaded_int(std::shared_ptr<DataSet>& dataset, const std::string& key) {
+    psnd_dtype dtype;
+    void*      data;
+    Shape*     shape;
+    std::tie(dtype, data, shape) = dataset->obtain(key);
+    if (dtype != psnd_int_type || shape->size() != 1) {
+        throw psnd_error(utils::concat("resume requires scalar int key ", key));
+    }
+    return static_cast<psnd_int*>(data)[0];
+}
+
+psnd_real get_loaded_real(std::shared_ptr<DataSet>& dataset, const std::string& key) {
+    psnd_dtype dtype;
+    void*      data;
+    Shape*     shape;
+    std::tie(dtype, data, shape) = dataset->obtain(key);
+    if (dtype != psnd_real_type || shape->size() != 1) {
+        throw psnd_error(utils::concat("resume requires scalar real key ", key));
+    }
+    return static_cast<psnd_real*>(data)[0];
+}
+
+void check_resume_adaptive_grid(std::shared_ptr<DataSet>& dataset, int current_sstep, int current_msize,
+                                double current_dt0) {
+    const int old_sstep = get_loaded_int(dataset, "control.sstep");
+    if (old_sstep != current_sstep) {
+        throw psnd_error(utils::concat("resume requires unchanged solver.sstep: old ", old_sstep, ", current ",
+                                       current_sstep));
+    }
+
+    if (dataset->haskey("control.msize")) {
+        const int old_msize = get_loaded_int(dataset, "control.msize");
+        if (old_msize != current_msize) {
+            throw psnd_error(utils::concat("resume requires unchanged solver.msize: old ", old_msize, ", current ",
+                                           current_msize));
+        }
+    }
+
+    const std::string dt_key = dataset->haskey("control.dt_backup") ? "control.dt_backup" : "control.dt";
+    if (dataset->haskey(dt_key)) {
+        const double old_dt = get_loaded_real(dataset, dt_key);
+        const double scale  = std::max({1.0, std::abs(old_dt), std::abs(current_dt0)});
+        if (std::abs(old_dt) > 1.0e-14 && std::abs(old_dt - current_dt0) > 1.0e-10 * scale) {
+            throw psnd_error(utils::concat("resume requires compatible base timestep: old ", dt_key, " ", old_dt,
+                                           ", current dt ", current_dt0));
+        }
+    }
+}
+
+bool has_recover_state(std::shared_ptr<DataSet>& dataset) {
+    return dataset->haskey("recover.istep") && dataset->haskey("recover.tsize") &&
+           dataset->haskey("recover.dtsize") && dataset->haskey("recover.last_tried_dtsize");
+}
+
+void check_resume_adaptive_time_grid(int old_tsize, double old_t, double current_t0, double current_dt0,
+                                     int current_msize) {
+    const double expected_t = current_t0 + current_dt0 * (old_tsize / static_cast<double>(current_msize));
+    const double scale      = std::max({1.0, std::abs(old_t), std::abs(expected_t)});
+    if (std::abs(old_t - expected_t) > 1.0e-10 * scale) {
+        throw psnd_error(utils::concat("resume requires compatible adaptive time grid: loaded control.tsize/control.t "
+                                       "does not match current dt/msize"));
+    }
+}
+
+}  // namespace
+
 const std::string Kernel_Iterative_Adapt::getName() { return "Kernel_Iterative_Adapt"; }
 
 int Kernel_Iterative_Adapt::getType() const { return utils::hash(FUNCTION_NAME); }
@@ -127,6 +197,42 @@ Status& Kernel_Iterative_Adapt::initializeKernel_impl(Status& stat) {
         stat.last_attempt    = false;
         stat.frozen          = false;
         stat.fail_type       = 0;
+        return stat;
+    }
+    if (is_resume_mode(_param->get_string({"load", "solver.load"}, LOC(), ""))) {
+        if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
+        if (std::ifstream{"X_STAT"}.good()) remove("X_STAT");
+        if (std::ifstream{utils::concat("X_STAT", stat.icalc)}.good()) {
+            std::string rmfile = utils::concat("X_STAT", stat.icalc);
+            remove(rmfile.c_str());
+        }
+
+        check_resume_adaptive_grid(_dataset_load, sstep, msize, dt0);
+
+        const bool        use_recover = has_recover_state(_dataset_load);
+        const std::string prefix      = use_recover ? "recover." : "control.";
+        if (use_recover) {
+            std::cout << "[Kernel_Iterative_Adapt] Resume from recover node" << std::endl;
+        } else {
+            std::cout << "[Kernel_Iterative_Adapt] Resume from control node" << std::endl;
+        }
+
+        const int    old_tsize = get_loaded_int(_dataset_load, prefix + "tsize");
+        const double old_t     = get_loaded_real(_dataset_load, "control.t");
+        check_resume_adaptive_time_grid(old_tsize, old_t, t0, dt0, msize);
+
+        istep[0]             = get_loaded_int(_dataset_load, prefix + "istep");
+        tsize[0]             = old_tsize;
+        dtsize[0]            = get_loaded_int(_dataset_load, prefix + "dtsize");
+        last_tried_dtsize[0] = get_loaded_int(_dataset_load, prefix + "last_tried_dtsize");
+        t[0]                 = old_t;
+        dt[0]                = dt0;
+        isamp[0]             = istep[0] / sstep;
+
+        stat.succ         = true;
+        stat.last_attempt = false;
+        stat.frozen       = false;
+        stat.fail_type    = 0;
         return stat;
     }
     if (use_exchange) {
@@ -360,7 +466,8 @@ Status& Kernel_Iterative_Adapt::executeKernel_impl(Status& stat) {
                   << std::setw(10) << "try"       // stepsize after this step
                   << std::endl;
     }
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":restart") != std::string::npos) {
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    if (load_str.find(":restart") != std::string::npos || is_resume_mode(load_str)) {
         stat.first_step = false;
     } else {
         stat.first_step = true;

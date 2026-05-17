@@ -1,5 +1,6 @@
 #include "psnd/Kernel_Iterative.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "psnd/hash_fnv1a.h"
@@ -7,6 +8,60 @@
 #include "psnd/vars_list.h"
 
 namespace PROJECT_NS {
+
+namespace {
+
+bool is_resume_mode(const std::string& load) { return load.find(":resume") != std::string::npos; }
+
+psnd_int get_loaded_int(std::shared_ptr<DataSet>& dataset, const std::string& key) {
+    psnd_dtype dtype;
+    void*      data;
+    Shape*     shape;
+    std::tie(dtype, data, shape) = dataset->obtain(key);
+    if (dtype != psnd_int_type || shape->size() != 1) {
+        throw psnd_error(utils::concat("resume requires scalar int key ", key));
+    }
+    return static_cast<psnd_int*>(data)[0];
+}
+
+psnd_real get_loaded_real(std::shared_ptr<DataSet>& dataset, const std::string& key) {
+    psnd_dtype dtype;
+    void*      data;
+    Shape*     shape;
+    std::tie(dtype, data, shape) = dataset->obtain(key);
+    if (dtype != psnd_real_type || shape->size() != 1) {
+        throw psnd_error(utils::concat("resume requires scalar real key ", key));
+    }
+    return static_cast<psnd_real*>(data)[0];
+}
+
+void check_resume_grid(std::shared_ptr<DataSet>& dataset, int current_sstep, double current_dt0) {
+    const int old_sstep = get_loaded_int(dataset, "control.sstep");
+    if (old_sstep != current_sstep) {
+        throw psnd_error(utils::concat("resume requires unchanged solver.sstep: old ", old_sstep, ", current ",
+                                       current_sstep));
+    }
+    if (dataset->haskey("control.dt")) {
+        const double old_dt = get_loaded_real(dataset, "control.dt");
+        const double scale  = std::max({1.0, std::abs(old_dt), std::abs(current_dt0)});
+        if (std::abs(old_dt) > 1.0e-14 && std::abs(old_dt - current_dt0) > 1.0e-10 * scale) {
+            throw psnd_error(utils::concat("resume requires compatible timestep: old control.dt ", old_dt,
+                                           ", current dt ", current_dt0));
+        }
+    }
+}
+
+void check_resume_time_grid(int old_istep, double old_t, double current_t0, double current_dt0) {
+    const double expected_t = current_t0 + old_istep * current_dt0;
+    const double scale      = std::max({1.0, std::abs(old_t), std::abs(expected_t)});
+    if (std::abs(old_t - expected_t) > 1.0e-10 * scale) {
+        throw psnd_error(utils::concat("resume requires compatible time grid: loaded control.istep/control.t imply dt ",
+                                       (old_istep == 0 ? 0.0 : (old_t - current_t0) / old_istep),
+                                       ", current dt ", current_dt0));
+    }
+}
+
+}  // namespace
 
 const std::string Kernel_Iterative::getName() { return "Kernel_Iterative"; }
 
@@ -65,6 +120,24 @@ Status& Kernel_Iterative::initializeKernel_impl(Status& stat) {
         dt[0]             = dt0;
         isamp[0]          = 0;
         istep[0]          = 0;
+        stat.succ         = true;
+        stat.last_attempt = false;
+        stat.frozen       = false;
+        stat.fail_type    = 0;
+        return stat;
+    }
+    if (is_resume_mode(_param->get_string({"load", "solver.load"}, LOC(), ""))) {
+        if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
+        check_resume_grid(_dataset_load, sstep, dt0);
+
+        const int    old_istep = get_loaded_int(_dataset_load, "control.istep");
+        const double old_t     = get_loaded_real(_dataset_load, "control.t");
+        check_resume_time_grid(old_istep, old_t, t0, dt0);
+
+        istep[0]          = old_istep;
+        t[0]              = old_t;
+        dt[0]             = dt0;
+        isamp[0]          = istep[0] / sstep;
         stat.succ         = true;
         stat.last_attempt = false;
         stat.frozen       = false;

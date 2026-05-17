@@ -1,0 +1,47 @@
+{
+    "model": {
+        "name": "QM",
+        "qm_flag": "BDFSOC",
+        "qm_config": "QM.in.BDF",
+        "qm_save_every_calc": true,
+        "qm_save_every_step": false,
+        "N": 24,
+        "F": 9,
+        "occ": 1,
+        "nac_threshold": 1.0,
+        "dt": "0.5 fs",
+        "tend": "1.5 fs"
+    },
+    "solver": {
+        "name": "NAD-adaptM",
+        "sampling_ele_flag": "SQCtest01",
+        "sampling_nuc_flag": "ReadDataSet",
+        "sampling_file": "init/samp",
+        "M": 1,
+        "msize": 1,
+        "sstep": 1,
+        "record_dumpstep": 1,
+        "gamma": 0.3333333,
+        "representation_flag": "General_soc",
+        "inp_repr_flag": "General_soc",
+        "ele_repr_flag": "General_soc",
+        "nuc_repr_flag": "General_soc",
+        "naforce": "NAFEXACT",
+        "hopping_choose_type": 1,
+        "hopping_direction_type": 2,
+        "reflect": false,
+        "use_cv": false,
+        "offd_projected": false,
+        "conserve_scale": false,
+        "thres_kcalpermol": 500.0,
+        "basis_switch": true,
+        "time_unit": "1.0 fs",
+        "record_tmp": false,
+        "dump_frequency": 0,
+        "use_conserve": false
+    },
+    "record": [
+        {"rule": "eig{model.rep}", "save": "eig.dat"},
+        {"rule": "TWFpop<mi>:R (w, KTWD{@0}<m[occ][occ]>, KTWD<mii>)", "save": "TWFpop.dat"}
+    ]
+}

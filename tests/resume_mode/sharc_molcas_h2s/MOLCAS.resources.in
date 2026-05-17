@@ -1,0 +1,10 @@
+# MOLCAS root path; make_molcas_resources.py substitutes OPENMOLCAS_ROOT.
+molcas {OPENMOLCAS_ROOT}
+
+# scratchdir / savedir are set by Model_SHARC_Interface under the -d directory.
+memory 1000
+ncpu 8
+delay 0.0
+
+numfrozcore 5
+numocc 0

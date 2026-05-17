@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <vector>
 
 #include "psnd/Einsum.h"
 #include "psnd/RuleEvaluator.h"
@@ -15,6 +16,112 @@
 #include "psnd/vars_list.h"
 
 namespace PROJECT_NS {
+
+namespace {
+
+bool starts_with(const std::string& text, const std::string& prefix) {
+    return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool is_resume_mode(const std::string& load) { return load.find(":resume") != std::string::npos; }
+
+void collect_leaf_keys(DataSet* dataset, const std::string& prefix, std::vector<std::string>& keys) {
+    for (auto& item : *(dataset->_data)) {
+        if (!item.second) continue;
+        const std::string key = prefix.empty() ? item.first : utils::concat(prefix, ".", item.first);
+        Node*             node = item.second.get();
+        if (node->type() == psnd_dataset_type) {
+            collect_leaf_keys(static_cast<DataSet*>(node), key, keys);
+        } else {
+            keys.push_back(key);
+        }
+    }
+}
+
+std::vector<std::size_t> shape_dims(Shape* shape) { return shape->dims(); }
+
+std::size_t per_frame_size(const std::vector<std::size_t>& dims) {
+    std::size_t size = 1;
+    for (std::size_t i = 1; i < dims.size(); ++i) size *= dims[i];
+    return size;
+}
+
+void copy_record_prefix_values(const std::string& key, psnd_dtype dtype, void* old_data, void* new_data,
+                               std::size_t count) {
+    switch (dtype) {
+        case psnd_real_type:
+            std::copy_n(static_cast<psnd_real*>(old_data), count, static_cast<psnd_real*>(new_data));
+            break;
+        case psnd_complex_type:
+            std::copy_n(static_cast<psnd_complex*>(old_data), count, static_cast<psnd_complex*>(new_data));
+            break;
+        case psnd_int_type:
+            std::copy_n(static_cast<psnd_int*>(old_data), count, static_cast<psnd_int*>(new_data));
+            break;
+        default:
+            throw psnd_error(utils::concat("resume record unsupported dtype for ", key, ": ", enum_t_as_str(dtype)));
+    }
+}
+
+void import_record_key(std::shared_ptr<DataSet>& old_dataset, std::shared_ptr<DataSet>& new_dataset,
+                       const std::string& key, int resume_frame, bool required) {
+    if (!new_dataset->haskey(key)) return;
+    if (!old_dataset->haskey(key)) {
+        if (required) throw psnd_error(utils::concat("resume record missing old key: ", key));
+        return;
+    }
+
+    psnd_dtype old_type;
+    psnd_dtype new_type;
+    void*      old_data;
+    void*      new_data;
+    Shape*     old_shape;
+    Shape*     new_shape;
+    std::tie(old_type, old_data, old_shape) = old_dataset->obtain(key);
+    std::tie(new_type, new_data, new_shape) = new_dataset->obtain(key);
+
+    if (old_type != new_type) {
+        throw psnd_error(utils::concat("resume record dtype mismatch for ", key, ": old ", enum_t_as_str(old_type),
+                                       ", current ", enum_t_as_str(new_type)));
+    }
+
+    const auto old_dims = shape_dims(old_shape);
+    const auto new_dims = shape_dims(new_shape);
+    if (old_dims.size() != new_dims.size() || old_dims.empty()) {
+        throw psnd_error(utils::concat("resume record rank mismatch for ", key));
+    }
+    for (std::size_t i = 1; i < old_dims.size(); ++i) {
+        if (old_dims[i] != new_dims[i]) {
+            throw psnd_error(utils::concat("resume record per-frame shape mismatch for ", key, ": old ",
+                                           old_shape->to_string(), ", current ", new_shape->to_string()));
+        }
+    }
+
+    const std::size_t old_frames  = old_dims[0];
+    const std::size_t new_frames  = new_dims[0];
+    const std::size_t frame_limit = static_cast<std::size_t>(std::max(0, resume_frame) + 1);
+    const std::size_t copy_frames = std::min({old_frames, new_frames, frame_limit});
+    const std::size_t count       = copy_frames * per_frame_size(old_dims);
+    copy_record_prefix_values(key, old_type, old_data, new_data, count);
+}
+
+void import_resume_record_history(std::shared_ptr<DataSet>& old_dataset, std::shared_ptr<DataSet>& new_dataset,
+                                  int resume_frame) {
+    if (old_dataset == nullptr) throw psnd_error("resume record import requires loaded DataSet");
+
+    std::vector<std::string> keys;
+    collect_leaf_keys(new_dataset.get(), "", keys);
+    for (const auto& key0 : keys) {
+        if (!starts_with(key0, "_.0.record.")) continue;
+        import_record_key(old_dataset, new_dataset, key0, resume_frame, true);
+
+        const std::string suffix = key0.substr(std::string("_.0.record.").size());
+        import_record_key(old_dataset, new_dataset, utils::concat("_.1.record.", suffix), resume_frame, false);
+        import_record_key(old_dataset, new_dataset, utils::concat("_.2.record.", suffix), resume_frame, false);
+    }
+}
+
+}  // namespace
 
 const std::string Kernel_Recorder::getName() { return "Kernel_Recorder"; }
 
@@ -132,6 +239,9 @@ Status& Kernel_Recorder::initializeKernel_impl(Status& stat) {
     bool not_parsed = _ruleset->getRules().size() == 0;
     if (not_parsed) parse();
 
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    if (is_resume_mode(load_str)) import_resume_record_history(_dataset_load, _dataset, isamp_ptr[0]);
+
     if (record_xyz) {
         for (int i = 0; i < natom; ++i) {
             if (atoms_ptr[i] <= 0) {
@@ -170,9 +280,9 @@ Status& Kernel_Recorder::initializeKernel_impl(Status& stat) {
         // seed_dir/traj.xyz new_dir/` themselves before running — we do not
         // replay history from bin.ds, because doing so would duplicate the
         // user's own `integrator.x` recording rule (if any) inside the dump.
-        const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
         const bool        is_load  = load_str.find(":restart") != std::string::npos  //
-                                  || load_str.find(":continue") != std::string::npos;
+                                  || load_str.find(":continue") != std::string::npos  //
+                                  || is_resume_mode(load_str);
         if (is_load) {
             skip_first_xyz_append = true;
         } else {

@@ -1,0 +1,20 @@
+# H2S CASSCF(8,6) / cc-pvdz, 4 singlets only.
+# Stripped from sharc4 SHARC_MOLCAS example: removed pcmset/pcmstate
+# (numerical gradients are too slow for a smoke test) and reduced roots to 4 0 0
+# so QM.in States 4 0 0 matches and SHARC builds a 4x4 Hamiltonian.
+
+basis cc-pvdz
+baslib ./basisset
+
+# CASSCF(8,6) with 5 doubly-occupied (inactive) orbitals.
+nactel 8
+ras2 6
+inactive 5
+
+roots 4 0 0
+
+rasscf_thrs           1e-8 1e-4 1e-4
+iterations            200 100
+
+method casscf
+cholesky_accu 1e-4

@@ -10,9 +10,19 @@
 #include "psnd/macro_utils.h"
 #include "psnd/vars_list.h"
 
+#include <string>
+#include <vector>
+
 namespace PROJECT_NS {
 
 inline bool isFileExists(const std::string& name) { return std::ifstream{name.c_str()}.good(); }
+
+inline std::string trim_copy(const std::string& text) {
+    const auto begin = text.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) return "";
+    const auto end = text.find_last_not_of(" \t\r\n");
+    return text.substr(begin, end - begin + 1);
+}
 
 const std::string Sampling_Elec::getName() { return "Sampling_Elec"; }
 
@@ -229,25 +239,83 @@ Status& Sampling_Elec::executeKernel_impl(Status& stat) {
             case ElectronicSamplingPolicy::ReadDataSet: {  // @NOTE: or read from _dataset_load?
                 std::string open_file = sampling_file;
                 if (!isFileExists(sampling_file)) open_file = utils::concat(sampling_file, stat.icalc, ".ds");
-                std::string   stmp, eachline;
+                if (!isFileExists(open_file)) {
+                    throw psnd_error(utils::concat("Sampling_Elec ReadDataSet cannot open electronic sampling file: ",
+                                                   open_file));
+                }
+                std::string   eachline;
                 std::ifstream ifs(open_file);
+                if (!ifs.is_open()) {
+                    throw psnd_error(utils::concat("Sampling_Elec ReadDataSet failed to open electronic sampling file: ",
+                                                   open_file));
+                }
+                bool read_c       = false;
+                bool read_rho_ele = false;
+                bool read_rho_nuc = false;
+                bool read_w       = false;
                 while (getline(ifs, eachline)) {
+                    eachline = trim_copy(eachline);
                     if (eachline == "init.c") {
-                        getline(ifs, eachline);
-                        for (int i = 0; i < Dimension::F; ++i) ifs >> c[i];
+                        if (!getline(ifs, eachline)) {
+                            throw psnd_error(utils::concat("Sampling_Elec ReadDataSet malformed init.c in ", open_file));
+                        }
+                        for (int i = 0; i < Dimension::F; ++i) {
+                            if (!(ifs >> c[i])) {
+                                throw psnd_error(
+                                    utils::concat("Sampling_Elec ReadDataSet failed to read init.c in ", open_file));
+                            }
+                        }
+                        read_c = true;
                     }
                     if (eachline == "init.rho_ele") {
-                        getline(ifs, eachline);
-                        for (int i = 0; i < Dimension::FF; ++i) ifs >> rho_ele[i];
+                        if (!getline(ifs, eachline)) {
+                            throw psnd_error(
+                                utils::concat("Sampling_Elec ReadDataSet malformed init.rho_ele in ", open_file));
+                        }
+                        for (int i = 0; i < Dimension::FF; ++i) {
+                            if (!(ifs >> rho_ele[i])) {
+                                throw psnd_error(utils::concat(
+                                    "Sampling_Elec ReadDataSet failed to read init.rho_ele in ", open_file));
+                            }
+                        }
+                        read_rho_ele = true;
                     }
                     if (eachline == "init.rho_nuc") {
-                        getline(ifs, eachline);
-                        for (int i = 0; i < Dimension::FF; ++i) ifs >> rho_nuc[i];
+                        if (!getline(ifs, eachline)) {
+                            throw psnd_error(
+                                utils::concat("Sampling_Elec ReadDataSet malformed init.rho_nuc in ", open_file));
+                        }
+                        for (int i = 0; i < Dimension::FF; ++i) {
+                            if (!(ifs >> rho_nuc[i])) {
+                                throw psnd_error(utils::concat(
+                                    "Sampling_Elec ReadDataSet failed to read init.rho_nuc in ", open_file));
+                            }
+                        }
+                        read_rho_nuc = true;
                     }
                     if (eachline == "init.w") {
-                        getline(ifs, eachline);
-                        ifs >> w[0];
+                        if (!getline(ifs, eachline) || !(ifs >> w[0])) {
+                            throw psnd_error(utils::concat("Sampling_Elec ReadDataSet failed to read init.w in ",
+                                                           open_file));
+                        }
+                        read_w = true;
                     }
+                }
+                if (!read_c || !read_rho_ele || !read_rho_nuc || !read_w) {
+                    std::vector<std::string> missing;
+                    if (!read_c) missing.push_back("init.c");
+                    if (!read_rho_ele) missing.push_back("init.rho_ele");
+                    if (!read_rho_nuc) missing.push_back("init.rho_nuc");
+                    if (!read_w) missing.push_back("init.w");
+                    std::string missing_keys;
+                    for (std::size_t i = 0; i < missing.size(); ++i) {
+                        if (i > 0) missing_keys += ", ";
+                        missing_keys += missing[i];
+                    }
+                    throw psnd_error(utils::concat("Sampling_Elec ReadDataSet missing electronic keys in ", open_file,
+                                                   ": ", missing_keys,
+                                                   ". Include electronic init data in init.ds or use another "
+                                                   "solver.sampling_ele_flag."));
                 }
                 // elec_utils::ker_from_c(rho_ele.data(), c.data(), 1, 0, Dimension::F);  ///< initial rho_ele
                 // elec_utils::ker_from_rho(rho_nuc.data(), rho_ele.data(), xi1, gamma1, Dimension::F, use_cv, iocc);

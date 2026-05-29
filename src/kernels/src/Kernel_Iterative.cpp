@@ -13,6 +13,11 @@ namespace {
 
 bool is_resume_mode(const std::string& load) { return load.find(":resume") != std::string::npos; }
 
+bool is_loaded_trajectory_mode(const std::string& load) {
+    return load.find(":continue") != std::string::npos || load.find(":restart") != std::string::npos ||
+           is_resume_mode(load);
+}
+
 psnd_int get_loaded_int(std::shared_ptr<DataSet>& dataset, const std::string& key) {
     psnd_dtype dtype;
     void*      data;
@@ -103,18 +108,20 @@ void Kernel_Iterative::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
 }
 
 Status& Kernel_Iterative::initializeKernel_impl(Status& stat) {
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":continue") != std::string::npos) {  //
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    if (load_str.find(":continue") != std::string::npos) {  //
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         // exactly copy from _dataset_load to _dataset
         // istep[0]          = _dataset_load->def_int("recover.istep", 1)[0]; // @TODO BUG
         // isamp[0]          = _dataset_load->def_int("recover.isamp", 1)[0]; // @TODO BUG
         stat.succ         = true;
         stat.last_attempt = false;
+        stat.first_step   = false;
         stat.frozen       = false;
         stat.fail_type    = 0;
         return stat;
     }
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":restart") != std::string::npos) {  //
+    if (load_str.find(":restart") != std::string::npos) {  //
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         t[0]              = _dataset_load->def_real("control.t", 1)[0];
         dt[0]             = dt0;
@@ -122,11 +129,12 @@ Status& Kernel_Iterative::initializeKernel_impl(Status& stat) {
         istep[0]          = 0;
         stat.succ         = true;
         stat.last_attempt = false;
+        stat.first_step   = false;
         stat.frozen       = false;
         stat.fail_type    = 0;
         return stat;
     }
-    if (is_resume_mode(_param->get_string({"load", "solver.load"}, LOC(), ""))) {
+    if (is_resume_mode(load_str)) {
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         check_resume_grid(_dataset_load, sstep, dt0);
 
@@ -140,6 +148,7 @@ Status& Kernel_Iterative::initializeKernel_impl(Status& stat) {
         isamp[0]          = istep[0] / sstep;
         stat.succ         = true;
         stat.last_attempt = false;
+        stat.first_step   = false;
         stat.frozen       = false;
         stat.fail_type    = 0;
         return stat;
@@ -150,13 +159,15 @@ Status& Kernel_Iterative::initializeKernel_impl(Status& stat) {
     isamp[0]          = 0;
     stat.succ         = true;
     stat.last_attempt = false;
+    stat.first_step   = true;
     stat.frozen       = false;
     stat.fail_type    = 0;
     return stat;
 }
 
 Status& Kernel_Iterative::executeKernel_impl(Status& stat) {
-    stat.first_step = true;
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    stat.first_step            = !is_loaded_trajectory_mode(load_str);
     while (istep[0] <= nstep) {
         if (istep[0] == nstep) {
             dt[0]       = 0;  // set dt=0 to remove dynamics! only record in last step

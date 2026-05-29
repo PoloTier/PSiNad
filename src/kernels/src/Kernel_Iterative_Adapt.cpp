@@ -22,6 +22,11 @@ namespace {
 
 bool is_resume_mode(const std::string& load) { return load.find(":resume") != std::string::npos; }
 
+bool is_loaded_trajectory_mode(const std::string& load) {
+    return load.find(":continue") != std::string::npos || load.find(":restart") != std::string::npos ||
+           is_resume_mode(load);
+}
+
 psnd_int get_loaded_int(std::shared_ptr<DataSet>& dataset, const std::string& key) {
     psnd_dtype dtype;
     void*      data;
@@ -141,7 +146,8 @@ void Kernel_Iterative_Adapt::setInputDataSet_impl(std::shared_ptr<DataSet> DS) {
 }
 
 Status& Kernel_Iterative_Adapt::initializeKernel_impl(Status& stat) {
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":continue") != std::string::npos) {  //
+    const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
+    if (load_str.find(":continue") != std::string::npos) {  //
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         if (std::ifstream{"X_STAT"}.good()) remove("X_STAT");
         if (std::ifstream{utils::concat("X_STAT", stat.icalc)}.good()) {
@@ -172,11 +178,12 @@ Status& Kernel_Iterative_Adapt::initializeKernel_impl(Status& stat) {
 
         stat.succ         = true;
         stat.last_attempt = false;
+        stat.first_step   = false;
         stat.frozen       = false;
         stat.fail_type    = 0;
         return stat;
     }
-    if (_param->get_string({"load", "solver.load"}, LOC(), "").find(":restart") != std::string::npos) {  //
+    if (load_str.find(":restart") != std::string::npos) {  //
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         if (std::ifstream{"X_STAT"}.good()) remove("X_STAT");
         if (std::ifstream{utils::concat("X_STAT", stat.icalc)}.good()) {
@@ -195,11 +202,12 @@ Status& Kernel_Iterative_Adapt::initializeKernel_impl(Status& stat) {
         last_tried_dtsize[0] = msize;
         stat.succ            = true;
         stat.last_attempt    = false;
+        stat.first_step      = false;
         stat.frozen          = false;
         stat.fail_type       = 0;
         return stat;
     }
-    if (is_resume_mode(_param->get_string({"load", "solver.load"}, LOC(), ""))) {
+    if (is_resume_mode(load_str)) {
         if (_dataset_load == nullptr) throw psnd_error(utils::concat(LOC(), ": DataSet Load error"));
         if (std::ifstream{"X_STAT"}.good()) remove("X_STAT");
         if (std::ifstream{utils::concat("X_STAT", stat.icalc)}.good()) {
@@ -231,6 +239,7 @@ Status& Kernel_Iterative_Adapt::initializeKernel_impl(Status& stat) {
 
         stat.succ         = true;
         stat.last_attempt = false;
+        stat.first_step   = false;
         stat.frozen       = false;
         stat.fail_type    = 0;
         return stat;
@@ -251,6 +260,7 @@ Status& Kernel_Iterative_Adapt::initializeKernel_impl(Status& stat) {
 
     stat.succ         = true;
     stat.last_attempt = false;
+    stat.first_step   = true;
     stat.frozen       = false;
     stat.fail_type    = 0;
 
@@ -467,11 +477,7 @@ Status& Kernel_Iterative_Adapt::executeKernel_impl(Status& stat) {
                   << std::endl;
     }
     const std::string load_str = _param->get_string({"load", "solver.load"}, LOC(), "");
-    if (load_str.find(":restart") != std::string::npos || is_resume_mode(load_str)) {
-        stat.first_step = false;
-    } else {
-        stat.first_step = true;
-    }
+    stat.first_step            = !is_loaded_trajectory_mode(load_str);
 
     int count_fail_type1 = 0;
 

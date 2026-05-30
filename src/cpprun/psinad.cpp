@@ -2,6 +2,7 @@
 #include <iostream>
 
 #include "defined_gflags.h"
+#include "psnd/Exception.h"
 #include "psnd/Kernel.h"
 #include "psnd/Model.h"
 #include "psnd/ModelFactory.h"
@@ -49,6 +50,13 @@ int main(int argc, char* argv[]) {
     std::string solver_name   = PM->get_string({"solver.name"}, LOC());
     std::string solver_scheme = PM->get_string({"solver.scheme"}, LOC(), "");
     std::size_t BGIDX         = PM->get_int({"BGIDX"}, LOC(), 0);
+    std::string load_str      = PM->get_string({"load", "solver.load"}, LOC(), "");
+    if (load_str.find(":resume") != std::string::npos || load_str.find(":continue") != std::string::npos ||
+        load_str.find(":restart") != std::string::npos) {
+        throw psnd_error(utils::concat("psinad cannot be used with loaded trajectory mode '", load_str,
+                                       "'. psinad always runs the Sampling solver before dynamics; use psidyn for "
+                                       ":resume, :continue, or :restart runs."));
+    }
 
     // apply_scheme(PM, solver_scheme);
     std::ofstream ofs(utils::concat(FLAGS_d, "/", "input.json"));

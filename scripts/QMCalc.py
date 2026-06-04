@@ -27,6 +27,7 @@
 import os  # filesystem utilities
 import shutil  # filesystem utilities
 import subprocess  # run external program as child process
+import tempfile  # create isolated scratch directories
 # import shelve
 import math  # mathematical functions
 import multiprocessing as mp  # run child processes in parallel
@@ -655,19 +656,25 @@ class QM:
         os.chdir(startdir)
 
     @staticmethod
-    def _launchQM1(rundir, fninp, fnlog, fnerr, qmexe):
+    def _launchQM1(rundir, fninp, fnlog, fnerr, qmexe, extra_env=None):
         """ This simple function executes the ks_config for running Gaussian QM
          It is needed to store the functions to execute for a parallel execution """
 
         # store starting dir
         startdir = os.getcwd()
-        # move to the directory of the calculation
-        os.chdir(rundir)
-        # run qm calculation
-        with open(fnlog, "w") as fout:
-            with open(fnerr, "w") as ferr:
-                subprocess.call(["nice", "-1", qmexe, fninp], stdout=fout, stderr=ferr)
-        os.chdir(startdir)
+        env = None
+        if extra_env is not None:
+            env = os.environ.copy()
+            env.update(extra_env)
+        try:
+            # move to the directory of the calculation
+            os.chdir(rundir)
+            # run qm calculation
+            with open(fnlog, "w") as fout:
+                with open(fnerr, "w") as ferr:
+                    subprocess.call(["nice", "-1", qmexe, fninp], stdout=fout, stderr=ferr, env=env)
+        finally:
+            os.chdir(startdir)
 
     # =============================================================================================================
     @staticmethod
@@ -710,6 +717,7 @@ class QM:
             fnlog = f"{qmsolver}-QM.log"
             fnerr = f"{qmsolver}-QM.err"
             rundir = QM._availablePathForQM()
+            qm_env = None
 
             if isinstance(qm.inputData, SharcQMInput):
                 fninp = 'QM.in'
@@ -750,6 +758,12 @@ class QM:
             else:
                 if 'restart' in qm.inputData.otheropt and qm.inputData.otheropt["restart"] is not None:
                     shutil.copy(qm.inputData.otheropt["restart"], rundir)
+
+            if qmsolver in ('bdf', 'bdfsoc'):
+                bdf_tmp_parent = os.path.abspath(os.environ.get("BDF_TMPDIR") or "/tmp")
+                os.makedirs(bdf_tmp_parent, exist_ok=True)
+                bdf_tmpdir = tempfile.mkdtemp(prefix="psinad_bdf_", dir=bdf_tmp_parent)
+                qm_env = {"BDF_TMPDIR": bdf_tmpdir}
   
             fninpList.append(fninp)
             fnlogList.append(fnlog)
@@ -763,12 +777,12 @@ class QM:
                 if qmsolver in ['mndo']:
                     pool.apply_async(QM._launchQM0, args=(rundir, fninp, fnlog, fnerr, qmexe))
                 else:
-                    pool.apply_async(QM._launchQM1, args=(rundir, fninp, fnlog, fnerr, qmexe))
+                    pool.apply_async(QM._launchQM1, args=(rundir, fninp, fnlog, fnerr, qmexe, qm_env))
             else:  # when serial calculation, run normally
                 if qmsolver in ['mndo']:
                     QM._launchQM0(rundir, fninp, fnlog, fnerr, qmexe)
                 else:
-                    QM._launchQM1(rundir, fninp, fnlog, fnerr, qmexe)
+                    QM._launchQM1(rundir, fninp, fnlog, fnerr, qmexe, qm_env)
 
         # ---------------------------------------------------------------------------------------------------------
 
